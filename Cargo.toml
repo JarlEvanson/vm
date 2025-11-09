@@ -4,6 +4,8 @@ members = [
     "lib/formats/elf",
     "lib/formats/pe",
 
+    "lib/platforms/uefi",
+
     "revm",
     "stub",
 
@@ -19,6 +21,8 @@ repository = "https://github.com/JarlEvanson/revm"
 [workspace.dependencies]
 elf = { path = "lib/formats/elf" }
 pe = { path = "lib/formats/pe" }
+
+uefi = { path = "lib/platforms/uefi" }
 
 anyhow = "1.0"
 clap = "4.5"
