@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "lib/formats/elf",
+
     "revm",
     "stub",
 
@@ -14,6 +16,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JarlEvanson/revm"
 
 [workspace.dependencies]
+elf = { path = "lib/formats/elf" }
+
 anyhow = "1.0"
 clap = "4.5"
 
