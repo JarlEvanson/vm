@@ -3,4 +3,6 @@
 mod context;
 mod relocation;
 
+mod uefi;
+
 pub use context::{AllocationPolicy, Context, FailedMapping, NotFound, OutOfMemory};
