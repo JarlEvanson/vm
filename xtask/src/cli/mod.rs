@@ -2,10 +2,13 @@
 
 use clap::Command;
 
-use crate::cli::{build_revm::BuildRevmConfig, build_stub::BuildStubConfig};
+use crate::cli::{
+    build_revm::BuildRevmConfig, build_stub::BuildStubConfig, package::PackageConfig,
+};
 
 pub mod build_revm;
 pub mod build_stub;
+pub mod package;
 
 /// The action to carry out.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -14,6 +17,8 @@ pub enum Action {
     BuildStub(BuildStubConfig),
     /// Build `revm` with a specific configuration.
     BuildRevm(BuildRevmConfig),
+    /// Packages `revm-stub` and `revm` into a single binary ready for execution.
+    Package(PackageConfig),
 }
 
 /// Parses `xtask`'s arguments to construct an [`Action`].
@@ -26,6 +31,7 @@ pub fn get_action() -> Action {
     match subcommand_name {
         "build-stub" => Action::BuildStub(build_stub::parse_arguments(subcommand_matches)),
         "build-revm" => Action::BuildRevm(build_revm::parse_arguments(subcommand_matches)),
+        "package" => Action::Package(package::parse_arguments(subcommand_matches)),
         _ => unreachable!("unexpected subcommand: {subcommand_name:?}"),
     }
 }
@@ -36,6 +42,7 @@ fn command_parser() -> Command {
         .about("Developer utility for running various tasks on tvm_loader and tvm")
         .subcommand(build_stub::subcommand_parser())
         .subcommand(build_revm::subcommand_parser())
+        .subcommand(package::subcommand_parser())
         .subcommand_required(true)
         .arg_required_else_help(true)
 }
