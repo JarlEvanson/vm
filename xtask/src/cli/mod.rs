@@ -2,8 +2,9 @@
 
 use clap::Command;
 
-use crate::cli::build_stub::BuildStubConfig;
+use crate::cli::{build_revm::BuildRevmConfig, build_stub::BuildStubConfig};
 
+pub mod build_revm;
 pub mod build_stub;
 
 /// The action to carry out.
@@ -11,6 +12,8 @@ pub mod build_stub;
 pub enum Action {
     /// Build `revm_stub` with a specific configuration.
     BuildStub(BuildStubConfig),
+    /// Build `revm` with a specific configuration.
+    BuildRevm(BuildRevmConfig),
 }
 
 /// Parses `xtask`'s arguments to construct an [`Action`].
@@ -22,6 +25,7 @@ pub fn get_action() -> Action {
     };
     match subcommand_name {
         "build-stub" => Action::BuildStub(build_stub::parse_arguments(subcommand_matches)),
+        "build-revm" => Action::BuildRevm(build_revm::parse_arguments(subcommand_matches)),
         _ => unreachable!("unexpected subcommand: {subcommand_name:?}"),
     }
 }
@@ -31,6 +35,7 @@ fn command_parser() -> Command {
     Command::new("xtask")
         .about("Developer utility for running various tasks on tvm_loader and tvm")
         .subcommand(build_stub::subcommand_parser())
+        .subcommand(build_revm::subcommand_parser())
         .subcommand_required(true)
         .arg_required_else_help(true)
 }
