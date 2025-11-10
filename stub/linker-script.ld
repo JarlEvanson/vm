@@ -1,4 +1,4 @@
-ENTRY(efi_main)
+ENTRY(main)
 
 PHDRS {
     code PT_LOAD        FLAGS (0x4 | 0x1);
@@ -51,10 +51,17 @@ SECTIONS {
         *(.data .data.*)
     } :data
 
+    .limine : {
+        *(.limine.start)
+        *(.limine .limine.*)
+        *(.limine.end)
+    } :data
+
     .bss : {
         *(.bss .bss.*)
     } :data
 
+    . = ALIGN(CONSTANT(COMMONPAGESIZE));
     .blob : {
         _blob_start = .;
     } :blob
