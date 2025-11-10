@@ -6,6 +6,8 @@ members = [
 
     "lib/platforms/uefi",
 
+    "lib/sync",
+
     "revm",
     "stub",
 
@@ -23,6 +25,8 @@ elf = { path = "lib/formats/elf" }
 pe = { path = "lib/formats/pe" }
 
 uefi = { path = "lib/platforms/uefi" }
+
+sync = { path = "lib/sync" }
 
 anyhow = "1.0"
 clap = "4.5"
