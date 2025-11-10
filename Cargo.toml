@@ -4,6 +4,7 @@ members = [
     "lib/formats/elf",
     "lib/formats/pe",
 
+    "lib/platforms/limine",
     "lib/platforms/uefi",
 
     "lib/sync",
@@ -24,6 +25,7 @@ repository = "https://github.com/JarlEvanson/revm"
 elf = { path = "lib/formats/elf" }
 pe = { path = "lib/formats/pe" }
 
+limine = { path = "lib/platforms/limine" }
 uefi = { path = "lib/platforms/uefi" }
 
 sync = { path = "lib/sync" }
