@@ -7,6 +7,7 @@ members = [
     "lib/platforms/limine",
     "lib/platforms/uefi",
 
+    "lib/font",
     "lib/sync",
 
     "revm",
@@ -28,6 +29,7 @@ pe = { path = "lib/formats/pe" }
 limine = { path = "lib/platforms/limine" }
 uefi = { path = "lib/platforms/uefi" }
 
+font = { path = "lib/font" }
 sync = { path = "lib/sync" }
 
 anyhow = "1.0"
