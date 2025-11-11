@@ -1,6 +1,6 @@
 //! Support for booting from the Limine boot protocol.
 
-use core::ptr;
+use core::{fmt::Write, ptr, slice};
 
 use limine::{
     BASE_REVISION, BASE_REVISION_MAGIC_0, BASE_REVISION_MAGIC_1, BaseRevisionTag,
@@ -8,7 +8,11 @@ use limine::{
 };
 use sync::ControlledModificationCell;
 
-use crate::graphics::surface::{Point, Surface};
+use crate::graphics::{
+    console::Console,
+    font::{FONT_MAP, GLYPH_ARRAY},
+    surface::{Point, Surface},
+};
 
 /// Indicates the start of the Limine boot protocol request zone.
 #[used]
@@ -198,6 +202,25 @@ const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
     (extracted_value as u64 * max_value_foreign) / 255
 }
 
-fn panic_handler(_: &core::panic::PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
+    if let Some(framebuffer_response) = unsafe { framebuffer_response.as_ref() } {
+        let framebuffers = unsafe {
+            slice::from_raw_parts(
+                framebuffer_response.framebuffers.cast::<&FramebufferV0>(),
+                framebuffer_response.framebuffer_count as usize,
+            )
+        };
+
+        for framebuffer in framebuffers {
+            let Some(framebuffer) = (unsafe { LimineSurface::new(framebuffer) }) else {
+                continue;
+            };
+
+            let mut console = Console::new(framebuffer, GLYPH_ARRAY, FONT_MAP, 0xFF_FF_FF_FF, 0x00);
+            let _ = writeln!(console, "{info}");
+        }
+    }
+
     loop {}
 }
