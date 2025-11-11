@@ -1,5 +1,7 @@
 //! Definitions of various graphics APIs and a graphical console based on those APIs.
 
+pub mod surface;
+
 pub mod font {
     //! Defines the graphical font interfaces for `tvm_loader`.
 
