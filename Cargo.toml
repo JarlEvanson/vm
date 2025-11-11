@@ -13,6 +13,8 @@ members = [
     "revm",
     "stub",
 
+    "tools/font-converter",
+
     "xtask",
 ]
 
@@ -31,6 +33,8 @@ uefi = { path = "lib/platforms/uefi" }
 
 font = { path = "lib/font" }
 sync = { path = "lib/sync" }
+
+font-converter = { path = "tools/font-converter" }
 
 anyhow = "1.0"
 clap = "4.5"
