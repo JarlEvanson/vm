@@ -8,6 +8,7 @@ use sync::Spinlock;
 use crate::boot::Context;
 
 mod boot;
+mod graphics;
 
 fn stub_main(context: &mut Context) {
     todo!()
