@@ -61,9 +61,47 @@ global_asm! {
 
     // 32-bit boot protocol entry point.
     "entry_32:",
-
+    
     ".code32", // Force code to be interpreted as 32-bit.
-    "jmp entry_32",
+    "mov edi, [esi + 0x214]", // eax: Load address.
+
+    ".equ stack_top_offset, (stack_top - entry_32)",
+    "lea esp, [edi + stack_top_offset]",
+
+    // Check for CPUID support.
+    "pushfd",
+    "pop ebx",
+    "mov ecx, ebx",
+    "xor ebx, 1 << 21",
+
+    "push ebx",
+    "popfd",
+    "pushfd",
+    "pop ebx",
+
+    "push ecx",
+    "popfd",
+
+    "xor ebx, ecx",
+    "je fail32",
+
+    // CPUID is supported: check that the CPUID request indicating support for long mode exists.
+    "mov eax, 0x80000000",
+    "cpuid",
+    "cmp eax, 0x80000000",
+    "jb fail32",
+
+    // Check that long mode is supported.
+    "mov eax, 0x80000001",
+    "cpuid",
+    "test edx, 1 << 29",
+    "jz fail32",
+
+    ".equ page_table_start_offset, (page_tables_start - entry_32)",
+
+    "9:", "jmp 9b",
+
+    "fail32:", "jmp fail32",
 
     // Force `entry_64` to be located precisely 0x200 after `entry_32`.
     "8:", ".space 512 - (8b - entry_32)",
@@ -73,6 +111,23 @@ global_asm! {
 
     ".code64", // Force code to be interpreted as 64-bit.
     "jmp entry_64",
+
+    ".align 512",
+    "stack:",
+    ".skip 4096",
+    "stack_top:",
+
+    ".align 4096",
+    "page_tables_start:",
+
+    "pml4:", // We need a single PML4 tables.
+    ".skip 4096",
+    "pml3:", // To support alignment issues, we need 6 PML3 tables.
+    ".skip 4096 * 6",
+    "pml2:", // To support alignment issues, we need 21 PML2 tables
+    ".skip 4096 * 21",
+
+    "page_tables_end:",
 
     "linux_header_end:",
 
