@@ -10,6 +10,7 @@ cp \
     run/x86_64/
 
 cp ~/projects/limine-binaries/BOOTX64.EFI run/x86_64/fat/EFI/BOOT/
+cp ~/projects/research/limine/release-tarballs/build/share/limine/BOOTX64.EFI run/x86_64/fat/EFI/BOOT/
 cat <<EOF > run/x86_64/fat/limine.conf
 serial: yes
 verbose: yes
