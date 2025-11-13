@@ -10,6 +10,7 @@ cp \
     run/x86_64/
 
 cp ~/projects/limine-binaries/BOOTX64.EFI run/x86_64/fat/EFI/BOOT/
+cp ~/projects/research/limine/release-tarballs/build/share/limine/BOOTX64.EFI run/x86_64/fat/EFI/BOOT/
 cat <<EOF > run/x86_64/fat/limine.conf
 serial: yes
 verbose: yes
@@ -33,6 +34,7 @@ EOF
 cargo xtask package --arch x86_64 --profile dev --output-path run/x86_64/fat/revm.efi
 
 qemu-system-x86_64 \
+    -M q35 \
     -drive if=pflash,format=raw,file=run/x86_64/code.fd \
     -drive if=pflash,format=raw,file=run/x86_64/vars.fd \
     -drive file=fat:rw:run/x86_64/fat,format=raw \
