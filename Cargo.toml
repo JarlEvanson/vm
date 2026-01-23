@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "lib/format/elf",
+    "lib/format/pe",
 
     "revm",
     "stub",
@@ -17,6 +18,7 @@ repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
 elf = { path = "lib/format/elf" }
+pe = { path = "lib/format/pe" }
 
 anyhow = "1.0"
 clap = "4.5"
