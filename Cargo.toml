@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [
+]
+
+[workspace.package]
+authors = [ "Jarl Evanson <evanson.jarl@gmail.com>" ]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/JarlEvanson/revm.git"
+
+[workspace.dependencies]
+
+[workspace.lints.rust]
+# Safety lints
+unsafe_op_in_unsafe_fn = "deny"
+
+# Documentation lints
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+# Safety lints
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"
+
+# Documentation lints
+missing_safety_doc = "deny"
+missing_errors_doc = "warn"
+missing_panics_doc = "warn"
+missing_docs_in_private_items = "warn"
+
+# Pedantic lints
+cast_possible_truncation = "warn"
+cast_possible_wrap = "warn"
+cast_precision_loss = "warn"
+cast_sign_loss = "warn"
+ptr_as_ptr = "warn"
+
+[profile.release]
+overflow-checks = true
