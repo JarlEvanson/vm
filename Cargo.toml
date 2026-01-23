@@ -4,6 +4,7 @@ members = [
     "lib/format/elf",
     "lib/format/pe",
 
+    "lib/stub_api",
     "lib/sync",
 
     "revm",
@@ -22,6 +23,7 @@ repository = "https://github.com/JarlEvanson/revm.git"
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 
+stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
 
 anyhow = "1.0"
