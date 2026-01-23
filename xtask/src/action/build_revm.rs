@@ -34,7 +34,7 @@ pub fn build_revm(config: BuildRevmConfig) -> Result<PathBuf> {
     binary_location.push("target");
     binary_location.push(target_string);
     binary_location.push(config.profile.target_string());
-    binary_location.push("revm-stub");
+    binary_location.push("revm");
 
     Ok(binary_location)
 }
