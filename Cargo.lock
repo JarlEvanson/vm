@@ -118,6 +118,10 @@ version = "0.1.0"
 [[package]]
 name = "revm-stub"
 version = "0.1.0"
+dependencies = [
+ "stub_api",
+ "sync",
+]
 
 [[package]]
 name = "strsim"
