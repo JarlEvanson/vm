@@ -4,6 +4,8 @@ members = [
     # Core libraries that provide useful abstractions for use in both `revm-stub` and `revm`.
     "lib/core/conversion",
 
+    "lib/format/elf",
+
     "revm",
     "stub",
 
@@ -18,6 +20,8 @@ repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
 conversion = { path = "lib/core/conversion" }
+
+elf = { path = "lib/format/elf" }
 
 anyhow = "1.0"
 clap = "4.5"
