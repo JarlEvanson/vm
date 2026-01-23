@@ -3,6 +3,8 @@ resolver = "3"
 members = [
     "revm",
     "stub",
+
+    "xtask",
 ]
 
 [workspace.package]
