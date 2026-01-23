@@ -3,3 +3,6 @@
 
 # Ignore testing artifacts
 /run
+
+# Ignore Nix build artifacts
+result
