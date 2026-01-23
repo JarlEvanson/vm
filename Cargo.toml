@@ -4,6 +4,8 @@ members = [
     "lib/format/elf",
     "lib/format/pe",
 
+    "lib/sync",
+
     "revm",
     "stub",
 
@@ -19,6 +21,8 @@ repository = "https://github.com/JarlEvanson/revm.git"
 [workspace.dependencies]
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
+sync = { path = "lib/sync" }
 
 anyhow = "1.0"
 clap = { version = "4.5", features = [ "env" ] }
