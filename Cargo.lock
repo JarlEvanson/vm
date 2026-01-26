@@ -127,6 +127,8 @@ dependencies = [
  "stub_api",
  "sync",
  "uefi",
+ "x86_64",
+ "x86_common",
 ]
 
 [[package]]
