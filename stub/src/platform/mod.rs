@@ -3,3 +3,5 @@
 
 mod generic;
 mod relocation;
+
+pub use generic::*;
