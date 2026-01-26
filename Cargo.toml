@@ -8,6 +8,8 @@ members = [
     "lib/format/elf",
     "lib/format/pe",
 
+    "lib/platform/uefi",
+
     "lib/sync",
 
     "revm",
@@ -28,6 +30,8 @@ memory = { path = "lib/core/memory" }
 
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
+uefi = { path = "lib/platform/uefi" }
 
 sync = { path = "lib/sync" }
 
