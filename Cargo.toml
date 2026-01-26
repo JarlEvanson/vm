@@ -4,6 +4,8 @@ members = [
     "lib/format/elf",
     "lib/format/pe",
 
+    "lib/platform/uefi",
+
     "lib/stub_api",
     "lib/sync",
 
@@ -22,6 +24,8 @@ repository = "https://github.com/JarlEvanson/revm.git"
 [workspace.dependencies]
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
+uefi = { path = "lib/platform/uefi" }
 
 stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
