@@ -13,5 +13,9 @@ uefi.workspace = true
 stub_api.workspace = true
 sync.workspace = true
 
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64.workspace = true
+x86_common.workspace = true
+
 [lints]
 workspace = true
