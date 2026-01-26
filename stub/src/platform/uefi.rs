@@ -3,9 +3,10 @@
 use core::{
     ffi,
     fmt::{self, Write},
-    mem,
+    hint, mem,
     ptr::{self, NonNull},
     slice,
+    sync::atomic::{AtomicPtr, Ordering},
 };
 
 use stub_api::TakeoverFlags;
@@ -29,6 +30,8 @@ use crate::{
     util::{u64_to_usize, usize_to_u64},
 };
 
+/// The [`Handle`] representing the image.
+static IMAGE_HANLDE: AtomicPtr<ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 /// The programs UEFI table.
 static UEFI_SYSTEM_TABLE: Spinlock<Option<UefiSystemTable>> = Spinlock::new(None);
 /// The saved UEFI memory map.
@@ -36,15 +39,17 @@ static MEMORY_MAP: Spinlock<MemoryMap> = Spinlock::new(MemoryMap::new());
 
 /// Rust entrypoint for the UEFI environment.
 pub extern "efiapi" fn uefi_main(
-    _image_handle: Handle,
+    image_handle: Handle,
     system_table_ptr: *mut SystemTable,
 ) -> Status {
+    IMAGE_HANLDE.store(image_handle.0, Ordering::Relaxed);
     *UEFI_SYSTEM_TABLE.lock() = NonNull::new(system_table_ptr).map(UefiSystemTable);
     // SAFETY:
     //
     // This call is made before any calls to the [`Platform`] APIs are made and there is no
     // multi-threading at this point.
     unsafe { platform_initialize(&Uefi) };
+    *crate::PANIC_FUNC.lock() = panic_handler;
 
     // SAFETY:
     //
@@ -636,3 +641,53 @@ unsafe impl Sync for UefiSystemTable {}
 //
 // It is always safe to read a pointer to a [`SystemTable`] across threads.
 unsafe impl Send for UefiSystemTable {}
+
+/// The UEFI environemnt-specific panic handler.
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    crate::println!("{info}");
+
+    // Acquire and match in two seperate actions to prevent the [`UEFI_SYSTEM_TABLE`] lock from
+    // being held for the remainder of the function.
+    let system_table_ptr_option = *UEFI_SYSTEM_TABLE.lock();
+    let Some(system_table_ptr) = system_table_ptr_option else {
+        loop {
+            hint::spin_loop()
+        }
+    };
+    let system_table_ptr = system_table_ptr.0;
+
+    // SAFETY:
+    //
+    // `system_table_ptr` was provided by the `efi_main` entry point.
+    let boot_services_ptr = unsafe { system_table_ptr.as_ref().boot_services };
+    // SAFETY:
+    //
+    // `boot_services_ptr` should point to a valid `BootServices1_0` structure, which
+    // is guaranteed to contain the `exit` function.
+    let exit = unsafe { (*boot_services_ptr).exit };
+
+    // SAFETY:
+    //
+    // Clean up any allocated frames before tearing down.
+    unsafe { deallocate_all_frames() }
+    // SAFETY:
+    //
+    // Clean up any allocated pool memory before tearing down.
+    unsafe { deallocate_all() }
+    // SAFETY:
+    //
+    // The only action performed after tearing the [`Platform`] down is returning.
+    unsafe { platform_teardown() }
+
+    let image_handle = Handle(IMAGE_HANLDE.load(Ordering::Relaxed));
+
+    // Ignore the result of `exit`. If it returns, it failed but we've already shut everything
+    // down.
+    // SAFETY:
+    //
+    // All allocations have been freed and the executable does not open any protocols.
+    let _ = unsafe { exit(image_handle, Status::LOAD_ERROR, 0, ptr::null_mut()) };
+    loop {
+        hint::spin_loop()
+    }
+}
