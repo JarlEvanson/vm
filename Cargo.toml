@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
+    "lib/arch/x86_32",
+    "lib/arch/x86_64",
+    "lib/arch/x86_common",
+
     "lib/format/elf",
     "lib/format/pe",
 
@@ -23,6 +27,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
+x86_32 = { path = "lib/arch/x86_32" }
+x86_64 = { path = "lib/arch/x86_64" }
+x86_common = { path = "lib/arch/x86_common" }
+
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 

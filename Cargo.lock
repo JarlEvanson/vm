@@ -169,6 +169,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "x86_32"
+version = "0.1.0"
+dependencies = [
+ "x86_common",
+]
+
+[[package]]
+name = "x86_64"
+version = "0.1.0"
+dependencies = [
+ "x86_common",
+]
+
+[[package]]
+name = "x86_common"
+version = "0.1.0"
+
+[[package]]
 name = "xtask"
 version = "0.1.0"
 dependencies = [
