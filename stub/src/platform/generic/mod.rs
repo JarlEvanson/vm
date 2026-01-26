@@ -1,10 +1,25 @@
 //! Definitions of the interface implementors of a platform are required to implement and an
 //! abstraction over those services for use by the rest of the executable.
 
-use core::{error, fmt, ptr::NonNull};
+use core::{
+    error, fmt,
+    ptr::{self, NonNull},
+    slice,
+};
 
 use stub_api::{MemoryDescriptor, Status, TakeoverFlags};
 use sync::ControlledModificationCell;
+
+mod allocation;
+mod frame_allocation;
+
+pub use allocation::{Allocation, allocate, deallocate, deallocate_all};
+pub use frame_allocation::{
+    FrameAllocation, allocate_frames, allocate_frames_aligned, deallocate_all_frames,
+    deallocate_frames, frame_size,
+};
+
+use crate::util::{u64_to_usize, usize_to_u64};
 
 /// The [`Platform`] implementation that is currently in use.
 static PLATFORM: ControlledModificationCell<Option<&'static dyn Platform>> =
@@ -41,6 +56,230 @@ pub(in crate::platform) fn platform() -> &'static dyn Platform {
     PLATFORM
         .get()
         .expect("platform implementation not initialized")
+}
+
+/// Returns the current physical [`MemoryMap`].
+///
+/// # Errors
+///
+/// [`BufferTooSmall`] is returned when the provided `buffer` is too small, and contains the
+/// required size of the buffer. Any allocations or deallocations may change the memory map.
+pub fn memory_map<'buffer>(
+    buffer: &'buffer mut [MemoryDescriptor],
+) -> Result<MemoryMap<'buffer>, BufferTooSmall> {
+    platform().memory_map(buffer)
+}
+
+/// Returns the size, in bytes, of a page.
+pub fn page_size() -> usize {
+    platform().page_size()
+}
+
+/// Maps [`Platform::page_size()`]ed physical memory region inside which `physical_address` is
+/// contained into the stub's virtual address space. Any call to this function will invalidate
+/// all previous temporary mappings produced by [`Platform::map_temporary()`].
+///
+/// This means that if `physical_address` is 1 byte from the top of a [`Platform::page_size()`]
+/// chunk, only 1 byte may be accessible.
+fn map_temporary(physical_address: u64) -> *mut u8 {
+    platform().map_temporary(physical_address)
+}
+
+/// Reads the `u8` located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn read_u8_at(physical_address: u64) -> u8 {
+    let mut byte = 0;
+    read_bytes_at(physical_address, slice::from_mut(&mut byte));
+
+    byte
+}
+
+/// Reads the `u16` located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn read_u16_at(physical_address: u64) -> u16 {
+    let mut bytes = [0; 2];
+    read_bytes_at(physical_address, &mut bytes);
+
+    u16::from_ne_bytes(bytes)
+}
+
+/// Reads the `u32` located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn read_u32_at(physical_address: u64) -> u32 {
+    let mut bytes = [0; 4];
+    read_bytes_at(physical_address, &mut bytes);
+
+    u32::from_ne_bytes(bytes)
+}
+
+/// Reads the `u64` located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn read_u64_at(physical_address: u64) -> u64 {
+    let mut bytes = [0; 8];
+    read_bytes_at(physical_address, &mut bytes);
+
+    u64::from_ne_bytes(bytes)
+}
+
+/// Reads the bytes located at `physical_address` into the provided `bytes` slice.
+///
+/// This function calls [`map_temporary()`].
+pub fn read_bytes_at(mut physical_address: u64, mut bytes: &mut [u8]) {
+    let page_size = usize_to_u64(page_size());
+    while !bytes.is_empty() {
+        // Calculate the number of bytes we will read this iteration.
+        let size = u64_to_usize(page_size - physical_address % page_size).min(bytes.len());
+        // Map the page we will modify.
+        let ptr = map_temporary(physical_address);
+
+        // SAFETY:
+        //
+        // The region that starts at `ptr` was a valid mapping and `size` represents the
+        // minimum of the mapping size or the size of the remaining bytes to be copied.
+        let read_slice = unsafe { slice::from_raw_parts(ptr, size) };
+        bytes[..size].copy_from_slice(read_slice);
+
+        physical_address = physical_address.wrapping_add(usize_to_u64(size));
+        bytes = &mut bytes[size..];
+    }
+}
+
+/// Writes the provided `u8` into the physical memory located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn write_u8_at(physical_address: u64, value: u8) {
+    write_bytes_at(physical_address, slice::from_ref(&value));
+}
+
+/// Writes the provided `u16` into the physical memory located at `physical_address`
+///
+/// This function calls [`map_temporary()`].
+pub fn write_u16_at(physical_address: u64, value: u16) {
+    write_bytes_at(physical_address, &value.to_ne_bytes());
+}
+
+/// Writes the provided `u32` into the physical memory located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn write_u32_at(physical_address: u64, value: u32) {
+    write_bytes_at(physical_address, &value.to_ne_bytes());
+}
+
+/// Writes the provided `u64` into the physical memory located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn write_u64_at(physical_address: u64, value: u64) {
+    write_bytes_at(physical_address, &value.to_ne_bytes());
+}
+
+/// Writes the bytes in `bytes` into the physical memory located at `physical_address`.
+///
+/// This function calls [`map_temporary()`].
+pub fn write_bytes_at(mut physical_address: u64, mut bytes: &[u8]) {
+    let page_size = usize_to_u64(page_size());
+    while !bytes.is_empty() {
+        // Calculate the number of bytes we will write this iteration.
+        let size = u64_to_usize(page_size - physical_address % page_size).min(bytes.len());
+        // Map the page we will modify.
+        let ptr = map_temporary(physical_address);
+
+        // SAFETY:
+        //
+        // The region that starts at `ptr` was a valid mapping and `size` represents the
+        // minimum of the mapping size or the size of the bytes that have not yet been written.
+        unsafe { ptr::copy(bytes.as_ptr(), ptr, size) }
+
+        physical_address = physical_address.wrapping_add(usize_to_u64(size));
+        bytes = &bytes[size..];
+    }
+}
+
+/// Maps [`Platform::page_size()`]ed physical memory region inside which `physical_address` is
+/// contained into the stub's virtual address space. Any call to this function will invalidate
+/// all previous identity mappings produced by [`Platform::map_identity()`].
+///
+/// This means that if `physical_address` is 1 byte from the top of a [`Platform::page_size()`]
+/// chunk, only 1 byte may be accessible.
+///
+/// # Panics
+///
+/// This function may panic if either the underlying implementation is invalid or the provided
+/// functions are invalid.
+pub fn map_identity(physical_address: u64) -> *mut u8 {
+    let ptr = platform().map_identity(physical_address);
+    assert_eq!(
+        usize_to_u64(ptr.addr()),
+        physical_address,
+        "identity map implementation failed"
+    );
+    ptr
+}
+/// Returns the physical address associated with the provided `virtual_address` if the
+/// translation is valid. Otherwise, return [`None`].
+pub fn translate_virtual(virtual_address: usize) -> Option<u64> {
+    platform().translate_virtual(virtual_address)
+}
+
+/// Executes a takover on behalf of the loaded executable. `key` is utilized to ensure that the
+/// memory map that the loaded executable has is accurate.
+///
+/// On success, the executable becomes the sole controller of the system. This means that the
+/// executable is free to directly manipulate the hardware in whatever manner it desires.
+pub fn takeover(key: u64, flags: TakeoverFlags) -> stub_api::Status {
+    platform().takeover(key, flags)
+}
+
+/// Returns the physical address of the UEFI system table, if present.
+pub fn uefi_system_table() -> Option<u64> {
+    platform().uefi_system_table()
+}
+
+/// Returns the physical address of the RSDP structure, if present.
+pub fn rsdp() -> Option<u64> {
+    platform().rsdp()
+}
+
+/// Returns the physical address of the XSDP structure, if present.
+pub fn xsdp() -> Option<u64> {
+    platform().xsdp()
+}
+
+/// Returns the physical address of the device tree structure, if present.
+pub fn device_tree() -> Option<u64> {
+    platform().device_tree()
+}
+
+/// Returns the physical address of the SMBIO 32 Entry Point, if present.
+pub fn smbios_32() -> Option<u64> {
+    platform().smbios_32()
+}
+
+/// Returns the physical address of the SMBIO 64 Entry Point, if present.
+pub fn smbios_64() -> Option<u64> {
+    platform().smbios_64()
+}
+
+/// The underlying printer.
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments) {
+    platform().print(args)
+}
+
+/// Prints to the platform-specific output.
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ($crate::platform::_print(format_args!($($arg)*)));
+}
+
+/// Prints to the platform-specific output, with a newline.
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
 /// Collection of various services provided by a platform-specific implementation.
