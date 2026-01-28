@@ -282,6 +282,64 @@ macro_rules! println {
     ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
 }
 
+#[doc(hidden)]
+pub fn _log(level: LogLevel, args: fmt::Arguments) {
+    if level >= LogLevel::Trace {
+        match level {
+            LogLevel::Trace => println!("TRACE: {args}"),
+            LogLevel::Debug => println!("DEBUG: {args}"),
+            LogLevel::Info => println!("INFO : {args}"),
+            LogLevel::Warn => println!("WARN : {args}"),
+            LogLevel::Error => println!("ERROR: {args}"),
+        }
+    }
+}
+
+/// Logs a message with [`LogLevel::Trace`].
+#[macro_export]
+macro_rules! trace {
+    ($($arg:tt)*) => ($crate::platform::_log(
+        crate::platform::LogLevel::Trace,
+        format_args!($($arg)*))
+    );
+}
+
+/// Logs a message with [`LogLevel::Debug`].
+#[macro_export]
+macro_rules! debug {
+    ($($arg:tt)*) => ($crate::platform::_log(
+        crate::platform::LogLevel::Debug,
+        format_args!($($arg)*))
+    );
+}
+
+/// Logs a message with [`LogLevel::Info`].
+#[macro_export]
+macro_rules! info {
+    ($($arg:tt)*) => ($crate::platform::_log(
+        crate::platform::LogLevel::Info,
+        format_args!($($arg)*))
+    );
+}
+
+/// Logs a message with [`LogLevel::Warn`].
+#[macro_export]
+macro_rules! warn {
+    ($($arg:tt)*) => ($crate::platform::_log(
+        crate::platform::LogLevel::Warn,
+        format_args!($($arg)*))
+    );
+}
+
+/// Logs a message with [`LogLevel::Error`].
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => ($crate::platform::_log(
+        crate::platform::LogLevel::Error,
+        format_args!($($arg)*))
+    );
+}
+
 /// Collection of various services provided by a platform-specific implementation.
 pub(in crate::platform) trait Platform: Send + Sync {
     /// Allocates a region of memory of `size` bytes aligned to `alignment`.
@@ -509,3 +567,18 @@ impl fmt::Display for BufferTooSmall {
 }
 
 impl error::Error for BufferTooSmall {}
+
+/// Various levels to determine the priority of information.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    /// Designates very low priority information.
+    Trace,
+    /// Designates lower priority information.
+    Debug,
+    /// Designates informatory logs.
+    Info,
+    /// Designates hazardous logs.
+    Warn,
+    /// Designates very serious logs.
+    Error,
+}
