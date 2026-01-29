@@ -19,7 +19,10 @@ use crate::platform::{read_u64_at, write_u64_at};
 use crate::{
     arch::{
         AddressSpaceImpl,
-        generic::address_space::{AddressSpace, MapError, ProtectionFlags},
+        generic::{
+            address_space::{AddressSpace, MapError, ProtectionFlags},
+            switch,
+        },
         relocate,
     },
     debug,
@@ -312,6 +315,9 @@ pub fn load() -> Result<(AddressSpaceImpl, u64, u64, u64), LoadExecutableError> 
     debug!("entry point at {entry_point:#x}");
 
     // Forget about the allocated frames to prevent early drop.
+    switch::FRAME_ALLOCATIONS
+        .lock()
+        .add_region(frames.physical_address(), frames.count());
     mem::forget(frames);
     Ok((
         address_space,
