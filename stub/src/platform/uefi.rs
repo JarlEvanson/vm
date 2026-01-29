@@ -644,7 +644,7 @@ unsafe impl Send for UefiSystemTable {}
 
 /// The UEFI environemnt-specific panic handler.
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
-    crate::println!("{info}");
+    crate::error!("{info}");
 
     // Acquire and match in two seperate actions to prevent the [`UEFI_SYSTEM_TABLE`] lock from
     // being held for the remainder of the function.
