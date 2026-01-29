@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+elf.workspace = true
+
 limine.workspace = true
 uefi.workspace = true
 

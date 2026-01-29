@@ -6,21 +6,38 @@ use core::{error, fmt};
 
 use sync::Spinlock;
 
+use crate::{arch::switch, blob::LoadExecutableError};
+
 pub mod arch;
+pub mod blob;
 pub mod platform;
 pub mod util;
 
 /// Entry point used after all boot protocol and architecture specific code has been run.
 fn stub_main() -> Result<(), StubError> {
+    let (mut address_space, entry_point) = blob::load()?;
+    switch(&mut address_space, entry_point).unwrap();
+
     Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StubError {}
+enum StubError {
+    /// An error occurred while loading the embedded executable.
+    LoadExecutableError(LoadExecutableError),
+}
+
+impl From<LoadExecutableError> for StubError {
+    fn from(value: LoadExecutableError) -> Self {
+        Self::LoadExecutableError(value)
+    }
+}
 
 impl fmt::Display for StubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {}
+        match self {
+            Self::LoadExecutableError(error) => write!(f, "error loading executable: {error}"),
+        }
     }
 }
 
