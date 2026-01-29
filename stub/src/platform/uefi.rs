@@ -27,6 +27,7 @@ use crate::{
         deallocate_all_frames, deallocate_frames, frame_size, platform_initialize,
         platform_teardown,
     },
+    stub_main,
     util::{u64_to_usize, usize_to_u64},
 };
 
@@ -52,6 +53,13 @@ pub extern "efiapi" fn uefi_main(
     *crate::PANIC_FUNC.lock() = panic_handler;
 
     crate::debug!("{:x}", crate::util::image_start());
+    let success = match stub_main() {
+        Ok(()) => true,
+        Err(error) => {
+            crate::error!("error loading from UEFI: {error}");
+            false
+        }
+    };
 
     // SAFETY:
     //
@@ -65,7 +73,11 @@ pub extern "efiapi" fn uefi_main(
     //
     // The only action performed after tearing the [`Platform`] down is returning.
     unsafe { platform_teardown() }
-    Status::SUCCESS
+    if success {
+        Status::SUCCESS
+    } else {
+        Status::LOAD_ERROR
+    }
 }
 
 /// Implementation of [`Platform`] for UEFI.
