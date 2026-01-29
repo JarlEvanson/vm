@@ -33,7 +33,7 @@ pub fn allocate(size: usize, alignment: usize) -> Option<Allocation> {
         // Drop `head` early to enable printing mechanisms that may require allocation.
         drop(head);
 
-        crate::println!("allocate({size}, {alignment}) -> None");
+        crate::trace!("allocate({size}, {alignment}) -> None");
         return None;
     };
 
@@ -56,7 +56,7 @@ pub fn allocate(size: usize, alignment: usize) -> Option<Allocation> {
     *head = Some(SendPtr(allocation_record_ptr.cast::<AllocationRecord>()));
     drop(head);
 
-    crate::println!("allocate({size}, {alignment}) -> {:p}", allocation.as_ptr());
+    crate::trace!("allocate({size}, {alignment}) -> {:p}", allocation.as_ptr());
     Some(Allocation {
         ptr: allocation,
         size,
@@ -76,7 +76,7 @@ pub fn allocate(size: usize, alignment: usize) -> Option<Allocation> {
     reason = "panicking only occurs if safety invariants are violated"
 )]
 pub unsafe fn deallocate(ptr: NonNull<u8>, size: usize, alignment: usize) {
-    crate::println!("deallocate({ptr:p}, {size}, {alignment})");
+    crate::trace!("deallocate({ptr:p}, {size}, {alignment})");
 
     let mut head = HEAD.lock();
     let mut current = head.as_ref().map(|wrapper| wrapper.0);
