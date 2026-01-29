@@ -16,7 +16,7 @@ mod frame_allocation;
 pub use allocation::{Allocation, allocate, deallocate, deallocate_all};
 pub use frame_allocation::{
     FrameAllocation, allocate_frames, allocate_frames_aligned, deallocate_all_frames,
-    deallocate_frames, frame_size,
+    deallocate_frames, frame_size, remove_region,
 };
 
 use crate::util::{u64_to_usize, usize_to_u64};

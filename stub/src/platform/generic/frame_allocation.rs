@@ -92,9 +92,76 @@ pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
         return;
     }
 
+    // SAFETY:
+    //
+    // The frame region will not be accessed after this.
+    unsafe { remove_region(physical_address, count) }
+
+    // SAFETY:
+    //
+    // The frame region will not be accessed after this.
+    unsafe { platform().deallocate_frames(physical_address, count) }
+}
+
+/// Deallocates all outstanding frame allocations.
+///
+/// # Safety
+///
+/// All frame regions allocated via this module must not be accessed after the start of this
+/// function.
+pub unsafe fn deallocate_all_frames() {
+    let frame_size = platform().frame_size();
+    let mut head = HEAD.lock();
+
+    let mut current = head.as_ref().map(|wrapper| wrapper.0);
+    while let Some(node) = current {
+        // SAFETY:
+        //
+        // All `Some` values point to a valid [`AllocationRecord`] and the list is
+        // protected by the [`HEAD`] lock.
+        let record = unsafe { node.as_ref() };
+
+        let size = record.end - record.start;
+        let count = size / frame_size;
+
+        // SAFETY:
+        //
+        // This region was allocated by this module and will not be accessed
+        // again after this call.
+        unsafe {
+            platform().deallocate_frames(record.start, count);
+        }
+
+        let next = record.next;
+
+        // SAFETY:
+        //
+        // This allocation record is no longer referenced.
+        unsafe {
+            deallocate(
+                node.cast::<u8>(),
+                mem::size_of::<AllocationRecord>(),
+                mem::align_of::<AllocationRecord>(),
+            );
+        }
+
+        current = next;
+    }
+
+    // Clear list and release lock
+    *head = None;
+}
+
+/// Removes a region of physical memory from the linked list.
+pub unsafe fn remove_region(start: u64, count: u64) {
+    if count == 0 {
+        // Zero-sized deallocations require no work.
+        return;
+    }
+
     let frame_size = platform().frame_size();
 
-    let free_start = physical_address;
+    let free_start = start;
     let Some(free_end) = count
         .checked_mul(platform().frame_size())
         .and_then(|size| free_start.checked_add(size))
@@ -106,7 +173,6 @@ pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
     let mut head = HEAD.lock();
     let mut current = head.as_ref().map(|wrapper| wrapper.0);
     let mut previous: Option<NonNull<AllocationRecord>> = None;
-
     while let Some(mut node) = current {
         // SAFETY:
         //
@@ -145,12 +211,6 @@ pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
             drop(head);
             panic!("free region not valid");
         }
-
-        // SAFETY:
-        //
-        // According to the invariants of this function, this frame region will not be accessed
-        // again. Moreover, the linked list will be modifed to guarantee no double-freeing occurs.
-        unsafe { platform().deallocate_frames(free_start, count) }
 
         match (overlap_start > record.start, overlap_end > record.end) {
             (true, true) => {
@@ -222,55 +282,6 @@ pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
             }
         }
     }
-}
-
-/// Deallocates all outstanding frame allocations.
-///
-/// # Safety
-///
-/// All frame regions allocated via this module must not be accessed after the start of this
-/// function.
-pub unsafe fn deallocate_all_frames() {
-    let frame_size = platform().frame_size();
-    let mut head = HEAD.lock();
-
-    let mut current = head.as_ref().map(|wrapper| wrapper.0);
-    while let Some(node) = current {
-        // SAFETY:
-        //
-        // All `Some` values point to a valid [`AllocationRecord`] and the list is
-        // protected by the [`HEAD`] lock.
-        let record = unsafe { node.as_ref() };
-
-        let size = record.end - record.start;
-        let count = size / frame_size;
-
-        // SAFETY:
-        //
-        // This region was allocated by this module and will not be accessed
-        // again after this call.
-        unsafe {
-            platform().deallocate_frames(record.start, count);
-        }
-
-        let next = record.next;
-
-        // SAFETY:
-        //
-        // This allocation record is no longer referenced.
-        unsafe {
-            deallocate(
-                node.cast::<u8>(),
-                mem::size_of::<AllocationRecord>(),
-                mem::align_of::<AllocationRecord>(),
-            );
-        }
-
-        current = next;
-    }
-
-    // Clear list and release lock
-    *head = None;
 }
 
 /// Inserts a region of physical memory into the linked list.
