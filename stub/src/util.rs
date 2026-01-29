@@ -1,5 +1,15 @@
 //! Various utility functions.
 
+unsafe extern "C" {
+    #[link_name = "_image_start"]
+    static IMAGE_START: u8;
+}
+
+/// Returns the virtual address of the start of the image.
+pub fn image_start() -> usize {
+    (&raw const IMAGE_START).addr()
+}
+
 /// Safely converts `value` to a `u64` relying on compile time code checking.
 #[expect(clippy::as_conversions)]
 pub const fn usize_to_u64(value: usize) -> u64 {
