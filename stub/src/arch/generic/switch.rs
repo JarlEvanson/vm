@@ -16,8 +16,8 @@ use crate::{
     },
     platform::{
         AllocationPolicy, BufferTooSmall, allocate, allocate_frames_aligned, deallocate,
-        deallocate_frames, frame_size, memory_map, read_bytes_at, read_u64_at, takeover,
-        write_u64_at,
+        deallocate_frames, frame_size, memory_map, read_bytes_at, read_u64_at, remove_region,
+        takeover, write_u64_at,
     },
     util::{u64_to_usize, usize_to_u64},
     warn,
@@ -42,6 +42,8 @@ pub const MAX_GENERIC_ID: u16 = 6;
 
 /// The saved memory map.
 static MEMORY_MAP: Spinlock<MemoryMapWrapper> = Spinlock::new(MemoryMapWrapper::new());
+/// The frames allocated by the application.
+static FRAME_ALLOCATIONS: Spinlock<FrameVec> = Spinlock::new(FrameVec::new());
 
 /// Handles generic cross address space calls.
 #[expect(clippy::too_many_arguments)]
@@ -120,6 +122,11 @@ pub fn handle_call(
                 frame_allocation.physical_address(),
             );
 
+            FRAME_ALLOCATIONS.lock().add_region(
+                frame_allocation.physical_address(),
+                frame_allocation.count(),
+            );
+
             // Forget the frame allocation to prevent it from being freed early.
             mem::forget(frame_allocation);
             Status::SUCCESS
@@ -127,10 +134,23 @@ pub fn handle_call(
         DEALLOCATE_FRAMES_ID => {
             let physical_address = arg_1;
             let count = arg_2;
+
+            let mut frame_allocation = FRAME_ALLOCATIONS.lock();
+            if !frame_allocation.contains_region(physical_address, count) {
+                warn!("tried to deallocate unallocated frame region");
+                return Status::INVALID_USAGE;
+            }
+
+            frame_allocation.remove_region(physical_address, count);
+
             // SAFETY:
             //
             // Application must have previously allocated said frames.
             unsafe { deallocate_frames(physical_address, count) }
+
+            // Ensure that the [`FRAME_ALLOCATIONS`] lock is held until the frames are successfully
+            // deallocated.
+            drop(frame_allocation);
             Status::SUCCESS
         }
         GET_MEMORY_MAP_ID => {
@@ -307,6 +327,12 @@ pub fn handle_call(
                 return Status::INVALID_USAGE;
             }
 
+            // Remove frame regions allocated by the executable to prevent them from being freed
+            // when this application exits.
+            for frame_region in FRAME_ALLOCATIONS.lock().descriptors() {
+                unsafe { remove_region(frame_region.0, frame_region.1) }
+            }
+
             takeover(key, flags)
         }
         _ => Status::NOT_SUPPORTED,
@@ -449,3 +475,261 @@ unsafe impl Send for MemoryMapWrapper {}
 //
 // [`MemoryMapWrapper`] can be safely sent across threads.
 unsafe impl Sync for MemoryMapWrapper {}
+
+/// Vector of all of the frame regions that have been allocated by the application.
+#[derive(Debug, PartialEq, Eq)]
+pub struct FrameVec {
+    /// The pointer to the buffer controlled by [`FrameVec`].
+    ptr: Option<NonNull<(u64, u64)>>,
+    /// The number of `(u64, u64)`s the buffer currently contains.
+    count: usize,
+    /// The number of `(u64, u64)`s the buffer can contain.
+    capacity: usize,
+}
+
+impl FrameVec {
+    /// Returns an empty [`FrameVec`].
+    pub const fn new() -> Self {
+        Self {
+            ptr: None,
+            count: 0,
+            capacity: 0,
+        }
+    }
+
+    /// Adds the frame region into the memory map.
+    pub fn add_region(&mut self, physical_address: u64, count: u64) {
+        if self.count == self.capacity {
+            self.reallocate();
+        }
+
+        let Some(ptr) = self.ptr else {
+            unreachable!("after reallocating, a buffer must have been allocated");
+        };
+
+        let write_ptr = ptr.as_ptr().wrapping_add(self.count);
+        // SAFETY:
+        //
+        // The region of memory has been allocated and is under the exclusive control of this
+        // [`FrameVec`].
+        unsafe { write_ptr.write((physical_address, count)) }
+
+        self.count += 1;
+        self.descriptors_mut()
+            .sort_unstable_by_key(|descriptor| descriptor.0);
+
+        let mut index = 0;
+        while index + 1 < self.count {
+            let lower = self.descriptors_mut()[index];
+            let upper = self.descriptors_mut()[index + 1];
+
+            let lower_start = lower.0;
+            let lower_end = lower_start + lower.1 * frame_size();
+
+            let upper_start = upper.0;
+            let upper_end = upper_start + upper.1 * frame_size();
+
+            // Since all entries are sorted, if an ipper entry starts before this entry ends, it
+            // must overlap.
+            let needs_merge = upper_start <= lower_end;
+            if needs_merge {
+                let merged_start = lower_start;
+                let merged_end = lower_end.max(upper_end);
+
+                let merged_len_frames = (merged_end - merged_start) / frame_size();
+
+                // Write merged descriptor into lower slot.
+                self.descriptors_mut()[index] = (merged_start, merged_len_frames);
+
+                // Shift remaining descriptors into the lower slots.
+                for i in index + 1..self.count - 1 {
+                    self.descriptors_mut()[i] = self.descriptors_mut()[i + 1];
+                }
+
+                self.count -= 1;
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    /// Removes a region of allocated frames from the memory map.
+    pub fn remove_region(&mut self, physical_address: u64, count: u64) {
+        let frame_size = frame_size();
+
+        let remove_start = physical_address;
+        let remove_end = remove_start + count * frame_size;
+
+        let mut index = 0;
+        while index < self.count {
+            let (region_start, region_len_frames) = self.descriptors_mut()[index];
+            let region_end = region_start + region_len_frames * frame_size;
+
+            // No overlap
+            if region_end <= remove_start || region_start >= remove_end {
+                index += 1;
+                continue;
+            }
+
+            // Case 1: fully covered → delete region
+            if remove_start <= region_start && remove_end >= region_end {
+                for i in index..self.count - 1 {
+                    self.descriptors_mut()[i] = self.descriptors_mut()[i + 1];
+                }
+                self.count -= 1;
+                continue; // do not increment index
+            }
+
+            // Case 2: remove middle → split
+            if remove_start > region_start && remove_end < region_end {
+                let left_len_frames = (remove_start - region_start) / frame_size;
+                let right_start = remove_end;
+                let right_len_frames = (region_end - remove_end) / frame_size;
+
+                // Update left
+                self.descriptors_mut()[index] = (region_start, left_len_frames);
+
+                // Make room for right
+                for i in (index + 1..=self.count).rev() {
+                    self.descriptors_mut()[i] = self.descriptors_mut()[i - 1];
+                }
+
+                self.descriptors_mut()[index + 1] = (right_start, right_len_frames);
+
+                self.count += 1;
+                return; // removal fully handled
+            }
+
+            // Case 3: trim front
+            if remove_start <= region_start {
+                let new_start = remove_end;
+                let new_len_frames = (region_end - remove_end) / frame_size;
+
+                self.descriptors_mut()[index] = (new_start, new_len_frames);
+
+                index += 1;
+                continue;
+            }
+
+            // Case 4: trim back
+            let new_len_frames = (remove_start - region_start) / frame_size;
+
+            self.descriptors_mut()[index] = (region_start, new_len_frames);
+            index += 1;
+        }
+    }
+
+    /// Returns `true` if the region is completely contained within the [`FrameVec`].
+    pub fn contains_region(&self, physical_address: u64, count: u64) -> bool {
+        if count == 0 {
+            return true;
+        }
+
+        let frame_size = frame_size();
+
+        let query_start = physical_address;
+        let query_end = query_start + count * frame_size;
+
+        let mut covered_until = query_start;
+
+        for i in 0..self.count {
+            let (region_start, region_count) = self.descriptors()[i];
+            let region_end = region_start + region_count * frame_size;
+
+            // Region is completely before the uncovered part
+            if region_end <= covered_until {
+                continue;
+            }
+
+            // Gap detected
+            if region_start > covered_until {
+                return false;
+            }
+
+            // Extend coverage
+            covered_until = region_end;
+
+            if covered_until >= query_end {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Returns an immutable slice of the frame regions.
+    pub fn descriptors(&self) -> &[(u64, u64)] {
+        if let Some(ptr) = self.ptr {
+            // SAFETY:
+            //
+            // The region of memory has been allocated, is under the exclusive control of this
+            // [`FrameVec`], and has been initialized up to `self.count`.
+            unsafe { slice::from_raw_parts(ptr.as_ptr(), self.count) }
+        } else {
+            &mut []
+        }
+    }
+
+    /// Returns a mutable slice of the frame regions.
+    pub fn descriptors_mut(&mut self) -> &mut [(u64, u64)] {
+        if let Some(ptr) = self.ptr {
+            // SAFETY:
+            //
+            // The region of memory has been allocated, is under the exclusive control of this
+            // [`FrameVec`], and has been initialized up to `self.count`.
+            unsafe { slice::from_raw_parts_mut(ptr.as_ptr(), self.count) }
+        } else {
+            &mut []
+        }
+    }
+
+    fn reallocate(&mut self) {
+        let new_capacity = self.capacity.saturating_mul(2);
+        let allocation = allocate(
+            new_capacity.strict_mul(mem::size_of::<(u64, u64)>()),
+            mem::align_of::<(u64, u64)>(),
+        )
+        .expect("allocation of application frame vector failed");
+
+        let new_slice = unsafe {
+            slice::from_raw_parts_mut(
+                allocation.ptr().cast::<MaybeUninit<(u64, u64)>>(),
+                self.count,
+            )
+        };
+
+        for (index, &descriptor) in self.descriptors_mut().iter().enumerate() {
+            new_slice[index].write(descriptor);
+        }
+
+        if let Some(ptr) = self.ptr {
+            // If we've allocated a buffer, free it.
+
+            // SAFETY:
+            //
+            // The region of memory demarcated by `active_ptr` is no longer in use.
+            unsafe {
+                deallocate(
+                    ptr.cast::<u8>(),
+                    self.capacity.strict_mul(mem::size_of::<MemoryDescriptor>()),
+                    mem::align_of::<MemoryDescriptor>(),
+                )
+            }
+        }
+
+        self.capacity = new_capacity;
+        self.ptr = Some(allocation.ptr_nonnull().cast::<(u64, u64)>());
+
+        // Forget [`Allocation`] to prevent early free.
+        mem::forget(allocation);
+    }
+}
+
+// SAFETY:
+//
+// [`FrameVec`] can be safely sent across threads.
+unsafe impl Send for FrameVec {}
+// SAFETY:
+//
+// [`FrameVec`] can be safely sent across threads.
+unsafe impl Sync for FrameVec {}
