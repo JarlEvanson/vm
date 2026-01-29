@@ -34,11 +34,11 @@ pub fn allocate_frames(
         // The frame region has not been exposed outside of this module and has not been stored.
         unsafe { platform().deallocate_frames(frame_region_start, count) }
 
-        crate::println!("allocate_frames({count}, {policy:?}) -> OutOfMemory");
+        crate::trace!("allocate_frames({count}, {policy:?}) -> OutOfMemory");
         return Err(OutOfMemory);
     };
 
-    crate::println!("allocate_frames({count}, {policy:?}) -> {frame_region_start:#x}");
+    crate::trace!("allocate_frames({count}, {policy:?}) -> {frame_region_start:#x}");
     Ok(FrameAllocation {
         physical_address: frame_region_start,
         count,
@@ -64,11 +64,11 @@ pub fn allocate_frames_aligned(
         // The frame region has not been exposed outside of this module and has not been stored.
         unsafe { platform().deallocate_frames(frame_region_start, count) }
 
-        crate::println!("allocate_frames_aligned({count}, {policy:?}) -> OutOfMemory");
+        crate::trace!("allocate_frames_aligned({count}, {policy:?}) -> OutOfMemory");
         return Err(OutOfMemory);
     };
 
-    crate::println!("allocate_frames_aligned({count}, {policy:?}) -> {frame_region_start:#x}");
+    crate::trace!("allocate_frames_aligned({count}, {policy:?}) -> {frame_region_start:#x}");
     Ok(FrameAllocation {
         physical_address: frame_region_start,
         count,
@@ -86,7 +86,7 @@ pub fn allocate_frames_aligned(
     reason = "panic only if safety invariants are breached"
 )]
 pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
-    crate::println!("deallocate_frames({physical_address:#x}, {count})");
+    crate::trace!("deallocate_frames({physical_address:#x}, {count})");
     if count == 0 {
         // Zero-sized deallocations require no work.
         return;
@@ -99,7 +99,7 @@ pub unsafe fn deallocate_frames(physical_address: u64, count: u64) {
         .checked_mul(platform().frame_size())
         .and_then(|size| free_start.checked_add(size))
     else {
-        crate::println!("deallocate_frames() failed");
+        crate::warn!("deallocate_frames() failed");
         return;
     };
 
