@@ -11,6 +11,8 @@ use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
 #[cfg(target_arch = "x86_64")]
 pub use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
+use crate::util::image_start;
+
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
 
@@ -22,6 +24,7 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     }
 
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
+    crate::debug!("revm image start: {:#x}", image_start());
 
     Status::SUCCESS
 }
