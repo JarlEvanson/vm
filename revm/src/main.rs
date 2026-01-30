@@ -5,6 +5,7 @@
 #![cfg_attr(not(test), no_main)]
 
 pub mod stub_protocol;
+pub mod util;
 
 /// Generic handler for panics.
 #[panic_handler]
