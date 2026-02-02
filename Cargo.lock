@@ -136,6 +136,8 @@ name = "revm-stub"
 version = "0.1.0"
 dependencies = [
  "elf",
+ "font",
+ "font-converter",
  "limine",
  "stub_api",
  "sync",
