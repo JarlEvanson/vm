@@ -20,6 +20,7 @@ pub fn build_revm_stub(config: BuildStubConfig) -> Result<PathBuf> {
     cmd.args(["--target", config.arch.as_target_spec()]);
     cmd.args(["-Z", "build-std=core,compiler_builtins"]);
     cmd.args(["-Z", "build-std-features=compiler-builtins-mem"]);
+    cmd.args(["-Z", "json-target-spec"]);
     cmd.args(["--profile", config.profile.as_str()]);
 
     run_cmd(cmd)?;
