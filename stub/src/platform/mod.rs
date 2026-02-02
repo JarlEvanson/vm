@@ -2,6 +2,7 @@
 //! required to carry out `revm-stub`'s goal.
 
 mod generic;
+mod graphics;
 mod limine;
 mod relocation;
 mod uefi;

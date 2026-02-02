@@ -6,12 +6,16 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[build-dependencies]
+font-converter.workspace = true
+
 [dependencies]
 elf.workspace = true
 
 limine.workspace = true
 uefi.workspace = true
 
+font.workspace = true
 stub_api.workspace = true
 sync.workspace = true
 
