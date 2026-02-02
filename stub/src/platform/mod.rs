@@ -7,6 +7,8 @@ use crate::platform::uefi::uefi_main;
 
 mod generic;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
+mod graphics;
+#[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 mod limine;
 mod relocation;
 mod uefi;
