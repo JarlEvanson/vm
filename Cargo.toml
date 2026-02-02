@@ -18,6 +18,8 @@ members = [
     "revm",
     "stub",
 
+    "tools/font-converter",
+
     "xtask",
 ]
 
@@ -41,6 +43,8 @@ uefi = { path = "lib/platform/uefi" }
 font = { path = "lib/font" }
 stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
+
+font-converter = { path = "tools/font-converter" }
 
 anyhow = "1.0"
 clap = { version = "4.5", features = [ "env" ] }
