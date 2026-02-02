@@ -7,6 +7,7 @@ use limine::{
     device_tree::{DEVICE_TREE_REQUEST_MAGIC, DeviceTreeRequest},
     efi_sys_table::{EFI_SYSTEM_TABLE_REQUEST_MAGIC, EfiSystemTableRequest},
     executable_addr::{EXECUTABLE_ADDRESS_REQUEST_MAGIC, ExecutableAddressRequest},
+    framebuffer::FramebufferV0,
     hhdm::{HHDM_REQUEST_MAGIC, HhdmRequest},
     memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest},
     rsdp::{RSDP_REQUEST_MAGIC, RsdpRequest},
@@ -14,7 +15,10 @@ use limine::{
 };
 use sync::ControlledModificationCell;
 
-use crate::util::u64_to_usize;
+use crate::{
+    platform::graphics::surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
+    util::u64_to_usize,
+};
 
 /// Indicates the start of the Limine boot protocol request zone.
 #[used]
@@ -165,4 +169,212 @@ fn validate_required_tables() -> (&'static [&'static MemoryMapEntry], u64, u64, 
         executable_address_response.physical_base,
         executable_address_response.virtual_base,
     )
+}
+
+/// Implementation of [`Surface`] for Limine framebuffers.
+struct LimineSurface {
+    /// The virtual address of the [`Surface`].
+    address: *mut u8,
+    /// The width of the [`Surface`] in pixels.
+    width: usize,
+    /// The height of the [`Surface`] in pixels.
+    height: usize,
+    /// The number of bytes between the start of one line and the start of an adjacent line.
+    pitch: usize,
+    /// The number of bits in a pixel.
+    bpp: u16,
+    /// The number of bits in the red bitmask.
+    red_mask_size: u8,
+    /// The offset of the bits in the red bitmask.
+    red_mask_shift: u8,
+    /// The number of bits in the green bitmask.
+    green_mask_size: u8,
+    /// The offset of the bits in the green bitmask.
+    green_mask_shift: u8,
+    /// The number of bits in the blue bitmask.
+    blue_mask_size: u8,
+    /// The offset of the bits in the blue bitmask.
+    blue_mask_shift: u8,
+}
+
+impl LimineSurface {
+    /// Creates a new [`LimineSurface`] as specified by [`FramebufferV0`].
+    ///
+    /// # Safety
+    ///
+    /// The produced [`LimineSurface`] must have exclusive access to the underlying region it is
+    /// manipulating.
+    pub unsafe fn new(framebuffer: &FramebufferV0) -> Option<LimineSurface> {
+        let width = usize::try_from(framebuffer.width).ok()?;
+        let height = usize::try_from(framebuffer.height).ok()?;
+        let pitch = usize::try_from(framebuffer.pitch).ok()?;
+
+        let max_x = width.saturating_sub(1);
+        let max_x_bit_offset = max_x.checked_mul(usize::from(framebuffer.bpp))?;
+
+        let max_y = height.saturating_sub(1);
+        let max_y_bit_offset = max_y.checked_mul(pitch)?.checked_mul(8)?;
+        let _ = max_x_bit_offset.checked_add(max_y_bit_offset)?;
+
+        match framebuffer.bpp {
+            8 | 16 | 32 | 64 => {}
+            _ => {
+                // TODO: support an arbitrary number of bits per pixel
+                return None;
+            }
+        }
+
+        let surface = Self {
+            address: framebuffer.address.cast::<u8>(),
+            width,
+            height,
+            pitch,
+            bpp: framebuffer.bpp,
+            red_mask_size: framebuffer.red_mask_size,
+            red_mask_shift: framebuffer.red_mask_shift,
+            green_mask_size: framebuffer.green_mask_size,
+            green_mask_shift: framebuffer.green_mask_shift,
+            blue_mask_size: framebuffer.blue_mask_size,
+            blue_mask_shift: framebuffer.blue_mask_shift,
+        };
+
+        Some(surface)
+    }
+}
+
+// SAFETY:
+//
+// Read and write bounds checking are properly implemented.
+unsafe impl Surface for LimineSurface {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    unsafe fn write_pixel_unchecked(&mut self, point: Point, value: u32) {
+        let x_bit_offset = point.x * usize::from(self.bpp);
+        let y_bit_offset = point.y * self.pitch * 8;
+        let bit_offset = x_bit_offset + y_bit_offset;
+
+        let red = convert_from_rgba(value, self.red_mask_size, 0) << self.red_mask_shift;
+        let green = convert_from_rgba(value, self.green_mask_size, 1) << self.green_mask_shift;
+        let blue = convert_from_rgba(value, self.blue_mask_size, 2) << self.blue_mask_shift;
+        let color = red | green | blue;
+
+        let address = self.address.wrapping_byte_add(bit_offset / 8);
+        match self.bpp {
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            8 => unsafe { address.write_volatile(color as u8) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            16 => unsafe { address.cast::<u16>().write_volatile(color as u16) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            32 => unsafe { address.cast::<u32>().write_volatile(color as u32) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            64 => unsafe { address.cast::<u64>().write_volatile(color) },
+            _ => todo!("support an arbitrary number of bits per pixel"),
+        }
+    }
+
+    unsafe fn read_pixel_unchecked(&self, point: Point) -> u32 {
+        let x_bit_offset = point.x * usize::from(self.bpp);
+        let y_bit_offset = point.y * self.pitch * 8;
+        let bit_offset = x_bit_offset + y_bit_offset;
+
+        let address = self.address.wrapping_byte_add(bit_offset / 8);
+        let value = match self.bpp {
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            8 => unsafe { address.read_volatile() as u64 },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            16 => unsafe { address.cast::<u16>().read_volatile() as u64 },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            32 => unsafe { address.cast::<u32>().read_volatile() as u64 },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            64 => unsafe { address.cast::<u64>().read_volatile() },
+            _ => todo!("support an arbitrary number of bits per pixel"),
+        };
+
+        let red = convert_to_rgba(value >> self.red_mask_shift, self.red_mask_size, 0);
+        let green = convert_to_rgba(value >> self.green_mask_shift, self.green_mask_size, 0);
+        let blue = convert_to_rgba(value >> self.blue_mask_shift, self.blue_mask_size, 0);
+
+        red | green | blue
+    }
+
+    fn copy_within(&mut self, write: Region, source: Point) -> Result<(), OutOfBoundsError> {
+        if !region_in_bounds(write, self.width(), self.height()) {
+            return Err(OutOfBoundsError);
+        }
+
+        let read = Region {
+            point: source,
+            width: write.width,
+            height: write.height,
+        };
+        if !region_in_bounds(read, self.width(), self.height()) {
+            return Err(OutOfBoundsError);
+        }
+
+        assert!(self.bpp >= 8);
+        let write_index = write.point.x + write.point.y * self.pitch;
+        let read_index = read.point.x + read.point.y * self.pitch;
+
+        let mut write_ptr = self.address.wrapping_byte_add(write_index);
+        let mut read_ptr = self.address.wrapping_byte_add(read_index);
+
+        let bytes_per_pixel = usize::from(self.bpp.div_ceil(8));
+        for _ in 0..write.height {
+            unsafe { core::ptr::copy(read_ptr, write_ptr, write.width.strict_mul(bytes_per_pixel)) }
+            write_ptr = write_ptr.wrapping_byte_add(self.pitch);
+            read_ptr = read_ptr.wrapping_byte_add(self.pitch);
+        }
+
+        Ok(())
+    }
+}
+
+// SAFETY:
+//
+// The pointer contained by [`LimineSurface`] does not provide access to thread-local or cpu-local
+// memory and thus [`LimineSurface`] is [`Send`].
+unsafe impl Send for LimineSurface {}
+
+// SAFETY:
+//
+// All exposed methods provided by [`LimineSurface`] cannot mutate with an immutable reference and
+// thus [`LimineSurface`] is [`Sync`].
+unsafe impl Sync for LimineSurface {}
+
+/// Converts a Limine pixel value to its RGBA representation.
+const fn convert_to_rgba(value: u64, size: u8, index: u8) -> u32 {
+    let max_value_foreign = (1u64 << size) - 1;
+    let converted_value_foreign = (value * 255) / max_value_foreign;
+
+    (converted_value_foreign << (index * 8)) as u32
+}
+
+/// Converts an RGBA pixel value to its Limine representation.
+const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
+    let extracted_value = (value >> (index * 8)) as u8;
+
+    let max_value_foreign = (1u64 << size) - 1;
+    (extracted_value as u64 * max_value_foreign) / 255
 }
