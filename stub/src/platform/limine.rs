@@ -1,6 +1,10 @@
 //! Support for booting from the Limine boot protocol.
 
-use core::{fmt::Write, ptr, slice};
+use core::{
+    fmt::{self, Write},
+    ptr::{self, NonNull},
+    slice,
+};
 
 use limine::{
     BASE_REVISION, BASE_REVISION_MAGIC_0, BASE_REVISION_MAGIC_1, BaseRevisionTag,
@@ -9,19 +13,30 @@ use limine::{
     executable_addr::{EXECUTABLE_ADDRESS_REQUEST_MAGIC, ExecutableAddressRequest},
     framebuffer::{FRAMEBUFFER_REQUEST_MAGIC, FramebufferRequest, FramebufferV0},
     hhdm::{HHDM_REQUEST_MAGIC, HhdmRequest},
-    memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest},
+    memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest, MemoryType},
     rsdp::{RSDP_REQUEST_MAGIC, RsdpRequest},
     smbios::{SMBIOS_REQUEST_MAGIC, SmbiosRequest},
 };
-use sync::ControlledModificationCell;
+use stub_api::{MemoryDescriptor, Status, TakeoverFlags};
+use sync::{ControlledModificationCell, Spinlock};
 
 use crate::{
-    platform::graphics::{
-        console::Console,
-        font::{FONT_MAP, GLYPH_ARRAY},
-        surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
+    arch::{
+        AddressSpaceImpl,
+        generic::address_space::{AddressSpace, ProtectionFlags},
     },
-    util::u64_to_usize,
+    platform::{
+        AllocationPolicy, BufferTooSmall, MemoryMap, OutOfMemory, Platform, allocator,
+        frame_allocator, frame_size,
+        graphics::{
+            console::Console,
+            font::{FONT_MAP, GLYPH_ARRAY},
+            surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
+        },
+        platform_initialize, read_u64_at, write_u64_at,
+    },
+    stub_main,
+    util::{u64_to_usize, usize_to_u64},
 };
 
 /// Indicates the start of the Limine boot protocol request zone.
@@ -124,11 +139,89 @@ static FRAMEBUFFER_REQUEST: ControlledModificationCell<FramebufferRequest> =
 #[unsafe(link_section = ".limine.end")]
 static REQUESTS_END_MARKER: [u64; 2] = limine::REQUESTS_END_MARKER;
 
+static FRAMEBUFFER: Spinlock<Option<Console<LimineSurface>>> = Spinlock::new(None);
+static ADDRESS_IMPL: Spinlock<Option<AddressSpaceImpl>> = Spinlock::new(None);
+
 /// Entry point for Rust when booted using the Limine boot protocol.
-pub extern "C" fn limine_main(stack_base: u64) -> ! {
+pub extern "C" fn limine_main(_: u64) -> ! {
     *crate::PANIC_FUNC.lock() = panic_handler;
-    let (memory_map_entries, hhdm_offset, executable_physical_base, executable_virtual_base) =
-        validate_required_tables();
+    let (memory_map_entries, _, _, _) = validate_required_tables();
+
+    let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
+
+    // SAFETY:
+    //
+    // The framebuffer response can be read and should not change if it is not NULL.
+    if let Some(framebuffer_response) = unsafe { framebuffer_response.as_ref() } {
+        // SAFETY:
+        //
+        // The Limine protocol specification specifies that this operation must be valid.
+        let framebuffers = unsafe {
+            slice::from_raw_parts(
+                framebuffer_response.framebuffers.cast::<&FramebufferV0>(),
+                framebuffer_response.framebuffer_count as usize,
+            )
+        };
+
+        *FRAMEBUFFER.lock() = unsafe {
+            framebuffers
+                .first()
+                .and_then(|framebuffer| LimineSurface::new(*framebuffer))
+                .map(|surface| Console::new(surface, GLYPH_ARRAY, FONT_MAP, 0xFF_FF_FF_FF, 0x00))
+        };
+    }
+
+    unsafe { platform_initialize(&Limine) };
+    frame_allocator::initialize(memory_map_entries.iter().map(|entry| {
+        let start = entry.base;
+        let end = entry.base.strict_add(entry.length);
+
+        let (start, end) = if entry.mem_type == MemoryType::USABLE {
+            (
+                start.next_multiple_of(frame_size()),
+                (end / frame_size()) * frame_size(),
+            )
+        } else {
+            (
+                (start / frame_size()) * frame_size(),
+                end.next_multiple_of(frame_size()),
+            )
+        };
+
+        let region_type = match entry.mem_type {
+            MemoryType::RESERVED => stub_api::MemoryType::RESERVED,
+            MemoryType::USABLE => stub_api::MemoryType::FREE,
+            MemoryType::BOOTLOADER_RECLAIMABLE => stub_api::MemoryType::BOOTLOADER_RECLAIMABLE,
+            MemoryType::EXECUTABLE_AND_MODULES => stub_api::MemoryType::BOOTLOADER_RECLAIMABLE,
+            MemoryType::BAD_MEMORY => stub_api::MemoryType::BAD,
+            MemoryType::ACPI_RECLAIMABLE => stub_api::MemoryType::ACPI_RECLAIMABLE,
+            MemoryType::ACPI_TABLES => stub_api::MemoryType::ACPI_RECLAIMABLE,
+            MemoryType::ACPI_NVS => stub_api::MemoryType::ACPI_NON_VOLATILE,
+            _ => stub_api::MemoryType::RESERVED,
+        };
+        MemoryDescriptor {
+            start,
+            count: (end - start) / frame_size(),
+            region_type,
+        }
+    }));
+    unsafe { *allocator::MAP.get_mut() = Some(map) };
+    unsafe { *allocator::UNMAP.get_mut() = Some(unmap) };
+
+    let mut address_impl = ADDRESS_IMPL.lock();
+
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        *address_impl = Some(AddressSpaceImpl::active_current(read_u64_at, write_u64_at))
+    };
+
+    drop(address_impl);
+
+    crate::debug!("{:x}", crate::util::image_start());
+    match stub_main() {
+        Ok(()) => {}
+        Err(error) => crate::error!("error loading from Limine: {error}"),
+    }
 
     loop {
         core::hint::spin_loop()
@@ -137,6 +230,183 @@ pub extern "C" fn limine_main(stack_base: u64) -> ! {
 
 /// Implementation of [`Platform`] for Limine.
 pub struct Limine;
+
+impl Platform for Limine {
+    fn allocate(&self, size: usize, alignment: usize) -> Option<NonNull<u8>> {
+        allocator::allocate(size, alignment)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, size: usize, alignment: usize) {
+        unsafe { allocator::deallocate(ptr, size, alignment) }
+    }
+
+    fn frame_size(&self) -> u64 {
+        4096
+    }
+
+    fn allocate_frames(&self, count: u64, policy: AllocationPolicy) -> Result<u64, OutOfMemory> {
+        frame_allocator::allocate_frames(count, policy)
+    }
+
+    unsafe fn deallocate_frames(&self, physical_address: u64, count: u64) {
+        unsafe { frame_allocator::deallocate_frames(physical_address, count) }
+    }
+
+    fn memory_map<'buffer>(
+        &self,
+        buffer: &'buffer mut [MemoryDescriptor],
+    ) -> Result<MemoryMap<'buffer>, BufferTooSmall> {
+        frame_allocator::memory_map(buffer)
+    }
+
+    fn page_size(&self) -> usize {
+        4096
+    }
+
+    fn map_temporary(&self, physical_address: u64) -> *mut u8 {
+        let hhdm_response_ptr = HHDM_REQUEST.get().response;
+        let Some(hhdm_response) = (unsafe { hhdm_response_ptr.as_ref() }) else {
+            panic!("Limine higher half direct map was not provided");
+        };
+        let hhdm_offset = hhdm_response.offset;
+
+        for entry in memory_map_entries() {
+            match entry.mem_type {
+                MemoryType::USABLE
+                | MemoryType::BOOTLOADER_RECLAIMABLE
+                | MemoryType::EXECUTABLE_AND_MODULES
+                | MemoryType::FRAMEBUFFER
+                | MemoryType::ACPI_TABLES
+                | MemoryType::ACPI_RECLAIMABLE
+                | MemoryType::ACPI_NVS => {}
+                _ => continue,
+            }
+
+            let entry_start = entry.base;
+            let entry_end = entry_start.strict_add(entry.length);
+            if entry_start <= physical_address && physical_address < entry_end {
+                return physical_address.strict_add(hhdm_offset) as *mut u8;
+            }
+        }
+
+        todo!("implement arbitary memory mapping")
+    }
+
+    fn map_identity(&self, physical_address: u64) -> *mut u8 {
+        let mut lock = ADDRESS_IMPL.lock();
+        let Some(address_impl) = lock.as_mut() else {
+            unreachable!("ADDRESS_IMPL was not initialized");
+        };
+
+        address_impl
+            .map(
+                physical_address,
+                physical_address,
+                1,
+                ProtectionFlags::READ | ProtectionFlags::WRITE | ProtectionFlags::EXECUTE,
+            )
+            .expect("failed to perform mapping");
+
+        u64_to_usize(physical_address) as *mut u8
+    }
+
+    fn translate_virtual(&self, virtual_address: usize) -> Option<u64> {
+        let virtual_address = usize_to_u64(virtual_address);
+
+        let hhdm_response_ptr = HHDM_REQUEST.get().response;
+        let Some(hhdm_response) = (unsafe { hhdm_response_ptr.as_ref() }) else {
+            panic!("Limine higher half direct map was not provided");
+        };
+        let hhdm_offset = hhdm_response.offset;
+
+        for entry in memory_map_entries() {
+            match entry.mem_type {
+                MemoryType::USABLE
+                | MemoryType::BOOTLOADER_RECLAIMABLE
+                | MemoryType::EXECUTABLE_AND_MODULES
+                | MemoryType::FRAMEBUFFER
+                | MemoryType::ACPI_TABLES
+                | MemoryType::ACPI_RECLAIMABLE
+                | MemoryType::ACPI_NVS => {}
+                _ => continue,
+            }
+
+            let entry_virtual_start = entry.base.strict_add(hhdm_offset);
+            let entry_virtual_end = entry_virtual_start.strict_add(entry.length);
+            if entry_virtual_start <= virtual_address && virtual_address < entry_virtual_end {
+                return Some(virtual_address.strict_sub(hhdm_offset));
+            }
+        }
+
+        let executable_address_response_ptr = EXECUTABLE_ADDRESS_REQUEST.get().response;
+        let Some(executable_address_response) =
+            (unsafe { executable_address_response_ptr.as_ref() })
+        else {
+            panic!("Limine executable address was not provided");
+        };
+
+        if virtual_address >= executable_address_response.virtual_base {
+            return Some(
+                virtual_address
+                    .wrapping_sub(executable_address_response.virtual_base)
+                    .wrapping_add(executable_address_response.physical_base),
+            );
+        }
+
+        let lock = ADDRESS_IMPL.lock();
+        let Some(address_impl) = lock.as_ref() else {
+            unreachable!("ADDRESS_IMPL was not initialized");
+        };
+
+        address_impl.translate_virt(virtual_address).ok()
+    }
+
+    fn takeover(&self, key: u64, flags: TakeoverFlags) -> Status {
+        todo!("{key:#x} {flags:?}")
+    }
+
+    fn print(&self, args: fmt::Arguments) {
+        if let Some(console) = FRAMEBUFFER.lock().as_mut() {
+            let _ = write!(console, "{args}");
+        }
+    }
+
+    fn uefi_system_table(&self) -> Option<u64> {
+        let uefi_system_table_response_ptr = UEFI_SYSTEM_TABLE_REQUEST.get().response;
+        let uefi_system_table_response = unsafe { uefi_system_table_response_ptr.as_ref()? };
+        Some(uefi_system_table_response.address)
+    }
+
+    fn rsdp(&self) -> Option<u64> {
+        let rsdp_response_ptr = RSDP_REQUEST.get().response;
+        let rsdp_response = unsafe { rsdp_response_ptr.as_ref()? };
+        self.translate_virtual(u64_to_usize(rsdp_response.address))
+    }
+
+    fn xsdp(&self) -> Option<u64> {
+        let rsdp_response_ptr = RSDP_REQUEST.get().response;
+        let rsdp_response = unsafe { rsdp_response_ptr.as_ref()? };
+        self.translate_virtual(u64_to_usize(rsdp_response.address))
+    }
+
+    fn device_tree(&self) -> Option<u64> {
+        let device_tree_response_ptr = DEVICE_TREE_REQUEST.get().response;
+        let device_tree_response = unsafe { device_tree_response_ptr.as_ref()? };
+        self.translate_virtual(device_tree_response.dtb_ptr.addr())
+    }
+
+    fn smbios_32(&self) -> Option<u64> {
+        let smbios_response_ptr = SMBIOS_REQUEST.get().response;
+        let smbios_response = unsafe { smbios_response_ptr.as_ref()? };
+        Some(smbios_response.entry_32)
+    }
+
+    fn smbios_64(&self) -> Option<u64> {
+        let smbios_response_ptr = SMBIOS_REQUEST.get().response;
+        let smbios_response = unsafe { smbios_response_ptr.as_ref()? };
+        Some(smbios_response.entry_64)
+    }
+}
 
 /// Validates that the required Limine requests have been fulfilled and returns the contents of
 /// those responses.
@@ -394,8 +664,55 @@ const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
     (extracted_value as u64 * max_value_foreign) / 255
 }
 
+fn memory_map_entries() -> &'static [&'static MemoryMapEntry] {
+    let memory_map_response_ptr = MEMORY_MAP_REQUEST.get().response;
+    let Some(memory_map_response) = (unsafe { memory_map_response_ptr.as_ref() }) else {
+        panic!("Limine memory map was not provided");
+    };
+
+    unsafe {
+        slice::from_raw_parts(
+            memory_map_response.entries.cast::<&MemoryMapEntry>(),
+            u64_to_usize(memory_map_response.entry_count),
+        )
+    }
+}
+
+fn map(physical_address: u64, _size: u64) -> Option<NonNull<u8>> {
+    let hhdm_response_ptr = HHDM_REQUEST.get().response;
+    let Some(hhdm_response) = (unsafe { hhdm_response_ptr.as_ref() }) else {
+        panic!("Limine higher half direct map was not provided");
+    };
+    let hhdm_offset = hhdm_response.offset;
+
+    for entry in memory_map_entries() {
+        match entry.mem_type {
+            MemoryType::USABLE
+            | MemoryType::BOOTLOADER_RECLAIMABLE
+            | MemoryType::EXECUTABLE_AND_MODULES
+            | MemoryType::FRAMEBUFFER
+            | MemoryType::ACPI_TABLES
+            | MemoryType::ACPI_RECLAIMABLE
+            | MemoryType::ACPI_NVS => {}
+            _ => continue,
+        }
+
+        let entry_start = entry.base;
+        let entry_end = entry_start.strict_add(entry.length);
+        if entry_start <= physical_address && physical_address < entry_end {
+            return NonNull::new(physical_address.strict_add(hhdm_offset) as *mut u8);
+        }
+    }
+
+    todo!("implement additional map functions")
+}
+
+unsafe fn unmap(_: NonNull<u8>, _: u64) {}
+
 /// The Limine boot protocol-specific panic handler.
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    crate::error!("{info}");
+
     let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
 
     // SAFETY:
@@ -412,7 +729,7 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
             )
         };
 
-        for framebuffer in framebuffers {
+        for framebuffer in framebuffers.iter().skip(1) {
             // SAFETY:
             //
             // We are panicking: we steal control over the framebuffers and overwrite all data.
