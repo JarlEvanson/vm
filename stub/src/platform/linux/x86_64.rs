@@ -27,6 +27,10 @@ global_asm! {
     ".equ pml3_table_count, 4",
     ".equ pml2_table_count, 17 + 2 + 2",
 
+    // Constants related to the memblock allocator.
+    ".equ memblock_end_link, 0b1",
+    ".equ memblock_entries_per_link, (4096 - 8) / 16",
+
     "_section_start:",
     ".skip 0x1F1",
 
@@ -380,6 +384,51 @@ global_asm! {
 
     "ret",
 
+    // Adds a link to the memblock allocator.
+    //
+    // # Arguments
+    //
+    // rax: the base address of the link.
+    "memblock_add_link:",
+
+    "push rbx",
+    "push rcx",
+
+    "mov rbx, memblock_end_link",     // previous link
+    "mov rcx, [rip + memblock_link]", // current link
+
+    "9:",
+
+    "cmp rcx, memblock_end_link",
+    "je 3f",
+
+    "mov rbx, rcx",   // previous link = current link
+    "mov rcx, [rcx]", // current link = *current link
+
+    "jmp 9b",
+
+    "3:",
+
+    "cmp rbx, memblock_end_link",
+    "jne 3f",
+
+    "mov [rip + memblock_link], rax",
+    "mov qword ptr [rax], memblock_end_link",
+
+    "jmp 2f",
+
+    "3:",
+
+    "mov [rbx], rax",
+    "mov qword ptr [rax], memblock_end_link",
+
+    "2:",
+
+    "pop rcx",
+    "pop rbx",
+
+    "ret",
+
     "fail64:", "hlt", "jmp fail64",
 
     "linux_header_end:",
@@ -397,6 +446,11 @@ global_asm! {
     "boot_params_pointer:", ".8byte 0",
     "file_pointer:", ".8byte 0",
     "file_size:", ".8byte 0",
+
+    // Memblock allocator data.
+    "memblock_link:", ".8byte memblock_end_link",
+    "memblock_entry_count:", ".8byte 0",
+    "memblock_link_count:", ".8byte 0",
 
     // Constant space page table data.
     "pml3_next_index:", ".byte 0",
