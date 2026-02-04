@@ -3,6 +3,7 @@
 
 // Other support modules.
 
+mod frame_allocator;
 mod generic;
 mod graphics;
 
