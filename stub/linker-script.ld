@@ -15,6 +15,7 @@ SECTIONS {
 
     .linux-efi-header : {
         KEEP(*(.linux-efi-header .linux-efi-header.*))
+        _real_sectors = DEFINED(_real_start) ? ABSOLUTE((_real_end - _real_start) / 512) : 0;
     } :NONE
 
     . = ALIGN(CONSTANT(COMMONPAGESIZE));

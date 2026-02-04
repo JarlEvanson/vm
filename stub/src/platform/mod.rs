@@ -6,6 +6,7 @@ mod frame_allocator;
 mod generic;
 mod graphics;
 mod limine;
+mod linux;
 mod relocation;
 mod uefi;
 
