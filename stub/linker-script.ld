@@ -13,7 +13,7 @@ SECTIONS {
     . = 0;
     _image_start = .;
 
-    .linux-efi-header : {
+    .linux-efi-header : ALIGN(4096) {
         KEEP(*(.linux-efi-header .linux-efi-header.*))
         _real_sectors = DEFINED(_real_start) ? ABSOLUTE((_real_end - _real_start) / 512) : 0;
     } :NONE
