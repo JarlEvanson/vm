@@ -63,7 +63,13 @@ global_asm! {
     "entry_32:",
 
     ".code32", // Force code to be interpreted as 32-bit.
-    "jmp entry_32",
+
+    // Initialize stack pointer.
+    ".equ stack_offset, _stack_top - _section_start",
+    "mov esp, 0x100000 + stack_offset",
+
+    "5:",
+    "jmp 5b",
 
     // Force `entry_64` to be located precisely 0x200 after `entry_32`.
     "8:", ".space 512 - (8b - entry_32)",
@@ -72,7 +78,12 @@ global_asm! {
     "entry_64:",
 
     ".code64", // Force code to be interpreted as 64-bit.
-    "jmp entry_64",
+
+    // Initialize stack pointer.
+    "lea rsp, [rip + _stack_top]",
+
+    "5:",
+    "jmp 5b",
 
     "linux_header_end:",
 
@@ -84,6 +95,9 @@ global_asm! {
 
     "_kernel_info_var_len_data:",
     "_kernel_info_end:",
+
+    ".space 8192",
+    "_stack_top:",
 
     ".popsection",
 }
