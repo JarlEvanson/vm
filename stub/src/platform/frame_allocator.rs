@@ -419,7 +419,7 @@ impl FrameAllocator {
                 self.next_location(&mut read_link, &mut read_index);
             }
 
-            for _ in 0..(subsuming_overlap_count - 1) {
+            while read_link != END_LINK {
                 let descriptor = read_descriptor(read_link, read_index);
                 write_descriptor(write_link, write_index, descriptor);
 

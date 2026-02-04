@@ -5,6 +5,7 @@
 use crate::platform::limine::limine_main;
 use crate::platform::uefi::uefi_main;
 
+mod allocator;
 mod frame_allocator;
 mod generic;
 mod graphics;
