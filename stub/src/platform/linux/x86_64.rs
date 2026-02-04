@@ -5,6 +5,15 @@ use core::arch::global_asm;
 global_asm! {
     ".pushsection .linux-efi-header, \"ax\"",
 
+    ".equ section_count_offset, 4 + 2",
+    ".equ optional_header_size_offset, 4 + 16",
+    ".equ entry_point_offset, 4 + 20 + 16",
+    ".equ image_size_offset, 4 + 20 + 56",
+
+    ".equ file_size_offset, 16",
+    ".equ file_offset_offset, 20",
+    ".equ section_header_size, 40",
+
     "_section_start:",
     ".skip 0x1F1",
 
@@ -82,6 +91,59 @@ global_asm! {
     // Initialize stack pointer.
     "lea rsp, [rip + _stack_top]",
 
+    "cld", // Clear direction flag.
+    "mov [rip + boot_params_pointer], rsi", // Save RSI (boot_params).
+
+    // We need to map the file data that we care about, the boot_params structure, and provide a
+    // slot for temporary mappings using our own page tables in order to allocate without possibly
+    // overwriting the data.
+    //
+    // Next, we need to iterate through the e820 map to build a memory map, then iterate through
+    // again in order to mark reserved regions (the stub file, the boot_params structure, the
+    // command line, and any setup_data structures).
+    //
+    // We can then use our memory map to allocate enough pages to load the stub file using the PE
+    // file format and provide access to a temporary mapping. This allows us to transition to Rust
+    // code.
+
+    // First, we calcuate maximum offset of the file we need to map.
+
+    // Calculate location of section headers.
+    "xor rsi, rsi", // Clear upper bits of rsi.
+    "mov si, [rip + _pe_header + optional_header_size_offset]", // Load optional header size.
+    "add rsi, 4 + 20", // Add PE signature and PE file header sizes.
+
+    // Load section count and calculate total size of section headers.
+    "xor rcx, rcx", // Clear upper bits of rcx.
+    "mov cx, [rip + _pe_header + section_count_offset]", // Load section count.
+    "mov rax, section_header_size", // Load size of each section header (constant).
+    "mul rcx", // Calculate total size of section header.
+
+    // Caculate maximum offset of PE header data we care about.
+    "mov rbx, rsi",
+    "add rbx, rax",
+
+    // Currently, we have the maximum file offset we care about in rbx, the section count in rcx,
+    // and the offset of the section headers from the start of the PE header in rsi.
+    "lea rdx, [rip + _pe_header]", // Calculate address of PE header.
+    "add rdx, rsi", // Calculate the address of the section header table.
+
+    ".pe_header_loop:",
+    "mov eax, [rdx + file_offset_offset]", // Load offset of the section data in the file.
+    "add eax, [rdx + file_size_offset]", // Add size of the section data in the file.
+    "sub eax, 0x400", // Subtract the truncated data from the offset.
+
+    "cmp rax, rbx", // Compare the maximum secton data offset to the maximum relevant file offset.
+    "cmovg rbx, rax", // Update the maximum relevant file offset to the larger of the two.
+
+    "add rbx, section_header_size", // Set forward to the next section header.
+    "loop .pe_header_loop", // Loop if any more section headers remain.
+
+    // Store the start of the file and the maximum relevant offset of the file.
+    "lea rax, [rip + entry_32]",
+    "mov [rip + file_pointer], rax",
+    "mov [rip + file_size], rbx",
+
     "5:",
     "jmp 5b",
 
@@ -96,8 +158,16 @@ global_asm! {
     "_kernel_info_var_len_data:",
     "_kernel_info_end:",
 
+    ".align 8",
+    "boot_params_pointer:", ".8byte 0",
+    "file_pointer:", ".8byte 0",
+    "file_size:", ".8byte 0",
+
     ".space 8192",
     "_stack_top:",
+
+    ".align 8",
+    "_pe_header:",
 
     ".popsection",
 }
