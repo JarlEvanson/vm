@@ -5,6 +5,7 @@
 use crate::platform::limine::limine_main;
 use crate::platform::uefi::uefi_main;
 
+mod allocator;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 mod frame_allocator;
 mod generic;
