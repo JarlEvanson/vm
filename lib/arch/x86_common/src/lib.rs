@@ -3,6 +3,7 @@
 
 #![no_std]
 
+pub mod control_register;
 pub mod cpuid;
 pub mod io_port;
 pub mod msr;

@@ -10,7 +10,10 @@ use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
 #[cfg(target_arch = "x86_64")]
 pub use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
-use crate::util::u64_to_usize;
+use crate::{
+    arch::{paging, virtualization},
+    util::{image_end, image_start, u64_to_usize, usize_to_u64},
+};
 
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
@@ -24,6 +27,15 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     };
 
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
+    assert!(image_end() - image_start() <= 2 * 1024 * 1024 * 1024);
+
+    unsafe {
+        paging::initialize_mapper(
+            generic_table.image_physical_address,
+            generic_table.image_virtual_address,
+        )
+    }
+
     crate::debug!(
         "revm image physical address: {:#x}",
         generic_table.image_physical_address
@@ -35,6 +47,35 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
 
     crate::trace!("{generic_table:#x?}");
     crate::trace!("{arch_table:#x?}");
+
+    let virtualization_supported = virtualization::supported();
+    crate::debug!("virtualization supported: {virtualization_supported}");
+    if virtualization_supported {
+        use x86_common::{control_register::*, msr::read_msr};
+
+        let cr0: u64;
+        unsafe { core::arch::asm!("mov {}, cr0", lateout(reg) cr0) };
+        let cr0 = Cr0::from_bits(cr0);
+        crate::debug!("{cr0:}");
+
+        let cr4: u64;
+        unsafe { core::arch::asm!("mov {}, cr4", lateout(reg) cr4) };
+        let cr4 = Cr4::from_bits(cr4);
+        crate::debug!("{cr4:}");
+
+        let cr0_fixed_0 = unsafe { read_msr(0x486) };
+        let cr0_fixed_1 = unsafe { read_msr(0x487) };
+        let cr4_fixed_0 = unsafe { read_msr(0x488) };
+        let cr4_fixed_1 = unsafe { read_msr(0x489) };
+
+        crate::debug!("Forced-0 {}", Cr0::from_bits(!cr0_fixed_1));
+        crate::debug!("Forced-1 {}", Cr0::from_bits(cr0_fixed_0));
+        crate::debug!("Flexible {}", Cr0::from_bits(!cr0_fixed_0 & cr0_fixed_1));
+
+        crate::debug!("Forced-0 {}", Cr4::from_bits(!cr4_fixed_1));
+        crate::debug!("Forced-1 {}", Cr4::from_bits(cr4_fixed_0));
+        crate::debug!("Flexible {}", Cr4::from_bits(!cr4_fixed_0 & cr4_fixed_1));
+    }
 
     Status::SUCCESS
 }

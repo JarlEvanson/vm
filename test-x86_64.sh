@@ -105,7 +105,8 @@ cargo xtask package \
     --output-path "${FAT_DIR}/revm.efi"
 
 qemu-system-x86_64 \
-    -machine q35 -m 512M \
+    -machine q35 -cpu qemu64,+vmx \
+    -enable-kvm -m 512M \
     -drive if=pflash,format=raw,file="${RUN_DIR}/code.fd",readonly=on \
     -drive if=pflash,format=raw,file="${RUN_DIR}/vars.fd" \
     -drive file=fat:rw:"${FAT_DIR}",format=raw \
