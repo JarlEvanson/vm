@@ -6,12 +6,15 @@ use core::{
     sync::atomic::{AtomicPtr, Ordering},
 };
 
-use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
+use stub_api::{AllocationFlags, GenericTable, GenericTableV0, Header, HeaderV0, Status};
 
 #[cfg(target_arch = "x86_64")]
 pub use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
-use crate::util::image_start;
+use crate::{
+    arch::virtualization,
+    util::{image_end, image_start, usize_to_u64},
+};
 
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
@@ -25,6 +28,29 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
 
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
     crate::debug!("revm image start: {:#x}", image_start());
+
+    let page_frame_size = generic_table.page_frame_size;
+
+    let total_image_size = usize_to_u64(image_end() - image_start());
+    let total_frames = total_image_size.div_ceil(page_frame_size);
+
+    let mut physical_address = 0;
+    let result = unsafe {
+        (generic_table.allocate_frames)(
+            total_frames,
+            page_frame_size,
+            AllocationFlags::ANY,
+            &mut physical_address,
+        )
+    };
+    if result != Status::SUCCESS {
+        crate::error!("failed to allocate contiguous physical memory");
+    }
+
+    let virtualization_supported = virtualization::supported();
+    if virtualization_supported {
+        crate::debug!("virtualization supported");
+    }
 
     Status::SUCCESS
 }
