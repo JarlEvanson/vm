@@ -5,6 +5,7 @@
 #![cfg_attr(not(test), no_main)]
 
 pub mod log;
+pub mod memory;
 pub mod stub_protocol;
 pub mod util;
 
