@@ -1,6 +1,9 @@
 //! Definitions and implementations of virtual and physical memory management APIs for `revm`.
 
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::{
+    error, fmt,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 pub mod phys;
 pub mod virt;
@@ -26,3 +29,15 @@ pub fn initialize_memory_management(page_frame_size: u64) {
 pub fn page_frame_size() -> u64 {
     PAGE_FRAME_SIZE.load(Ordering::Relaxed)
 }
+
+/// Indicates that there were no frame regions that were free and complied with the provided flags.
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct OutOfMemory;
+
+impl fmt::Display for OutOfMemory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.pad("out of memory")
+    }
+}
+
+impl error::Error for OutOfMemory {}
