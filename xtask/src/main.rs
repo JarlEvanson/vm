@@ -23,6 +23,7 @@ const DEPENDENCIES: &[&str] = &[
     "pe",
     "limine",
     "uefi",
+    "stub_api",
     "sync",
     "xtask",
 ];

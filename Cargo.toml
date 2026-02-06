@@ -11,6 +11,7 @@ members = [
     "lib/platform/limine",
     "lib/platform/uefi",
 
+    "lib/stub_api",
     "lib/sync",
 
     "revm",
@@ -35,6 +36,7 @@ pe = { path = "lib/format/pe" }
 limine = { path = "lib/platform/limine" }
 uefi = { path = "lib/platform/uefi" }
 
+stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
 
 anyhow = "1.0"
