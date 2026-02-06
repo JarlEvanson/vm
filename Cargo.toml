@@ -26,7 +26,7 @@ elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 
 anyhow = "1.0"
-clap = "4.5"
+clap = { version = "4.5", features = [ "env" ] }
 
 [workspace.lints.rust]
 # Safety lints
