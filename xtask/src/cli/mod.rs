@@ -3,12 +3,13 @@
 use clap::Command;
 
 use crate::cli::{
-    build_revm::BuildRevmConfig, build_stub::BuildStubConfig, package::PackageConfig,
-    run::RunConfig,
+    build_revm::BuildRevmConfig, build_stub::BuildStubConfig, clippy::ClippyConfig,
+    package::PackageConfig, run::RunConfig,
 };
 
 pub mod build_revm;
 pub mod build_stub;
+pub mod clippy;
 pub mod package;
 pub mod run;
 
@@ -23,6 +24,8 @@ pub enum Action {
     Package(PackageConfig),
     /// Runs a packaged `revm-stub` and `revm`.
     Run(RunConfig),
+    /// Runs `cargo clippy` on all packages.
+    Clippy(ClippyConfig),
 }
 
 /// Parses `xtask`'s arguments to construct an [`Action`].
@@ -37,6 +40,7 @@ pub fn get_action() -> Action {
         "build-revm" => Action::BuildRevm(build_revm::parse_arguments(subcommand_matches)),
         "package" => Action::Package(package::parse_arguments(subcommand_matches)),
         "run" => Action::Run(run::parse_arguments(subcommand_matches)),
+        "clippy" => Action::Clippy(clippy::parse_arguments(subcommand_matches)),
         _ => unreachable!("unexpected subcommand: {subcommand_name:?}"),
     }
 }
@@ -49,6 +53,7 @@ fn command_parser() -> Command {
         .subcommand(build_revm::subcommand_parser())
         .subcommand(package::subcommand_parser())
         .subcommand(run::subcommand_parser())
+        .subcommand(clippy::subcommand_parser())
         .subcommand_required(true)
         .arg_required_else_help(true)
 }
