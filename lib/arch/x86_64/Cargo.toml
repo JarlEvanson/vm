@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+conversion.workspace = true
+memory.workspace = true
+
 x86_common.workspace = true
 
 [lints]
