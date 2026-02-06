@@ -16,7 +16,7 @@ pub mod cli;
 pub mod common;
 
 /// The packages in the workspace that are not `revm-stub` and `revm`.
-const DEPENDENCIES: &[&str] = &["elf", "pe", "limine", "uefi", "sync", "xtask"];
+const DEPENDENCIES: &[&str] = &["elf", "pe", "limine", "uefi", "stub_api", "sync", "xtask"];
 
 fn main() -> Result<()> {
     match cli::get_action() {
