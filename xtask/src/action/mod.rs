@@ -7,6 +7,7 @@ use std::{error, fmt, io};
 pub mod build_revm;
 pub mod build_stub;
 pub mod package;
+pub mod run;
 
 /// Runs a [`Command`][c], handling non-zero exit codes and other failures.
 ///

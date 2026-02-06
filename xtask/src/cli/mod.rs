@@ -4,11 +4,13 @@ use clap::Command;
 
 use crate::cli::{
     build_revm::BuildRevmConfig, build_stub::BuildStubConfig, package::PackageConfig,
+    run::RunConfig,
 };
 
 pub mod build_revm;
 pub mod build_stub;
 pub mod package;
+pub mod run;
 
 /// The action to carry out.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -19,6 +21,8 @@ pub enum Action {
     BuildRevm(BuildRevmConfig),
     /// Packages `revm-stub` and `revm` into a single binary ready for execution.
     Package(PackageConfig),
+    /// Runs a packaged `revm-stub` and `revm`.
+    Run(RunConfig),
 }
 
 /// Parses `xtask`'s arguments to construct an [`Action`].
@@ -32,6 +36,7 @@ pub fn get_action() -> Action {
         "build-stub" => Action::BuildStub(build_stub::parse_arguments(subcommand_matches)),
         "build-revm" => Action::BuildRevm(build_revm::parse_arguments(subcommand_matches)),
         "package" => Action::Package(package::parse_arguments(subcommand_matches)),
+        "run" => Action::Run(run::parse_arguments(subcommand_matches)),
         _ => unreachable!("unexpected subcommand: {subcommand_name:?}"),
     }
 }
@@ -43,6 +48,7 @@ fn command_parser() -> Command {
         .subcommand(build_stub::subcommand_parser())
         .subcommand(build_revm::subcommand_parser())
         .subcommand(package::subcommand_parser())
+        .subcommand(run::subcommand_parser())
         .subcommand_required(true)
         .arg_required_else_help(true)
 }
