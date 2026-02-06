@@ -5,6 +5,10 @@ members = [
     "lib/core/conversion",
     "lib/core/memory",
 
+    "lib/arch/x86_32",
+    "lib/arch/x86_64",
+    "lib/arch/x86_common",
+
     "lib/format/elf",
     "lib/format/pe",
 
@@ -29,6 +33,10 @@ repository = "https://github.com/JarlEvanson/revm.git"
 [workspace.dependencies]
 conversion = { path = "lib/core/conversion" }
 memory = { path = "lib/core/memory" }
+
+x86_32 = { path = "lib/arch/x86_32" }
+x86_64 = { path = "lib/arch/x86_64" }
+x86_common = { path = "lib/arch/x86_common" }
 
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
