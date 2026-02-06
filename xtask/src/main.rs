@@ -4,13 +4,19 @@
 use anyhow::Result;
 
 use crate::{
-    action::{build_revm::build_revm, build_stub::build_revm_stub, package::package, run::run},
+    action::{
+        build_revm::build_revm, build_stub::build_revm_stub, clippy::clippy, package::package,
+        run::run,
+    },
     cli::Action,
 };
 
 pub mod action;
 pub mod cli;
 pub mod common;
+
+/// The packages in the workspace that are not `revm-stub` and `revm`.
+const DEPENDENCIES: &[&str] = &["elf", "pe", "xtask"];
 
 fn main() -> Result<()> {
     match cli::get_action() {
@@ -27,6 +33,7 @@ fn main() -> Result<()> {
             println!("packaged revm located at \"{}\"", path.display());
         }
         Action::Run(config) => run(config)?,
+        Action::Clippy(config) => clippy(config)?,
     }
 
     Ok(())
