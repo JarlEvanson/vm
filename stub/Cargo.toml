@@ -10,6 +10,7 @@ repository.workspace = true
 limine.workspace = true
 uefi.workspace = true
 
+stub_api.workspace = true
 sync.workspace = true
 
 [lints]
