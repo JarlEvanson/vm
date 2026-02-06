@@ -31,6 +31,33 @@ impl Arch {
             Self::X86_64 => "targets/x86_64-unknown-none.json",
         }
     }
+
+    /// Returns the name of the subfolder inside which the OVMF files for [`Arch`] are stored.
+    pub fn as_ovmf_folder(&self) -> &'static str {
+        match self {
+            Self::Aarch64 => "aarch64",
+            Self::X86_32 => "ia32",
+            Self::X86_64 => "x64",
+        }
+    }
+
+    /// Returns the name of the Limine binary associated with [`Arch`].
+    pub fn as_limine_binary(&self) -> &'static str {
+        match self {
+            Self::Aarch64 => "BOOTAA64.EFI",
+            Self::X86_32 => "BOOTIA32.EFI",
+            Self::X86_64 => "BOOTX64.EFI",
+        }
+    }
+
+    /// Returns the name of the `QEMU` executable associated with [`Arch`].
+    pub fn as_qemu_executable(&self) -> &'static str {
+        match self {
+            Self::Aarch64 => "qemu-system-aarch64",
+            Self::X86_32 => "qemu-system-i386",
+            Self::X86_64 => "qemu-system-x86_64",
+        }
+    }
 }
 
 impl clap::ValueEnum for Arch {
