@@ -19,6 +19,9 @@ pub mod common;
 const DEPENDENCIES: &[&str] = &[
     "conversion",
     "memory",
+    "x86_32",
+    "x86_64",
+    "x86_common",
     "elf",
     "pe",
     "limine",
