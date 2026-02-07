@@ -33,6 +33,8 @@ pub extern "C" fn limine_main() -> ! {
         panic!("Loaded using unsupported base revision (possible revisions are 0, 1, and 2)")
     }
 
+    crate::debug!("Image Start: {:#x}", crate::util::image_start());
+
     loop {
         core::hint::spin_loop()
     }
