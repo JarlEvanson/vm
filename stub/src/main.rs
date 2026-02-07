@@ -5,6 +5,7 @@
 use sync::Spinlock;
 
 pub mod platform;
+pub mod util;
 
 /// The platform-specific panic handler function.
 static PANIC_FUNC: Spinlock<fn(&core::panic::PanicInfo) -> !> = Spinlock::new(fallback);

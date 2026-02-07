@@ -10,5 +10,7 @@ pub extern "efiapi" fn uefi_main(
     _image_handle: Handle,
     system_table_ptr: *mut SystemTable,
 ) -> Status {
+    crate::debug!("Image Start: {:#x}", crate::util::image_start());
+
     Status::SUCCESS
 }
