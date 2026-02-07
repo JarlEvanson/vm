@@ -188,6 +188,8 @@ dependencies = [
 name = "x86_32"
 version = "0.1.0"
 dependencies = [
+ "conversion",
+ "memory",
  "x86_common",
 ]
 
