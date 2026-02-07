@@ -51,6 +51,8 @@ pub extern "efiapi" fn uefi_main(
     unsafe { platform_initialize(&Uefi) };
     *crate::PANIC_FUNC.lock() = panic_handler;
 
+    crate::debug!("{:#x}", crate::util::image_start());
+
     // SAFETY:
     //
     // Clean up any allocated frames before tearing down.
