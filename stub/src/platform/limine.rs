@@ -39,6 +39,8 @@ pub extern "C" fn limine_main() -> ! {
         }
     }
 
+    crate::debug!("{:#x}", crate::util::image_start());
+
     loop {
         core::hint::spin_loop()
     }
