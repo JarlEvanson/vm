@@ -123,10 +123,14 @@ version = "0.1.0"
 name = "revm-stub"
 version = "0.1.0"
 dependencies = [
+ "elf",
  "limine",
  "stub_api",
  "sync",
  "uefi",
+ "x86_32",
+ "x86_64",
+ "x86_common",
 ]
 
 [[package]]
