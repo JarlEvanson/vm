@@ -52,6 +52,13 @@ pub extern "efiapi" fn uefi_main(
     *crate::PANIC_FUNC.lock() = panic_handler;
 
     crate::debug!("{:#x}", crate::util::image_start());
+    let success = match crate::stub_main() {
+        Ok(()) => true,
+        Err(error) => {
+            crate::error!("error loading from UEFI: {error}");
+            false
+        }
+    };
 
     // SAFETY:
     //
@@ -65,7 +72,11 @@ pub extern "efiapi" fn uefi_main(
     //
     // The only action performed after tearing the [`Platform`] down is returning.
     unsafe { platform_teardown() }
-    Status::SUCCESS
+    if success {
+        Status::SUCCESS
+    } else {
+        Status::LOAD_ERROR
+    }
 }
 
 /// Implementation of [`Platform`] for UEFI.
