@@ -5,6 +5,7 @@
 use sync::Spinlock;
 
 pub mod arch;
+pub mod executable;
 pub mod platform;
 pub mod util;
 
