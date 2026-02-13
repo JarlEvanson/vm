@@ -16,4 +16,5 @@ pub use x86_common::{
         pae::{PaeAddressSpace, PaeError},
     },
     relocate,
+    switch::{SwitchError, switch},
 };
