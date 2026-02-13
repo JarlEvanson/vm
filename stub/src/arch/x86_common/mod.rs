@@ -5,6 +5,7 @@ use elf::header::Machine;
 use crate::executable::relocation::{FinalizedRelocation, RelocationError, RelocationInfo};
 
 pub mod paging;
+pub mod switch;
 
 /// Handles the ELF relocation types on `x86_32` and `x86_64`.
 ///
