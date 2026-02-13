@@ -10,9 +10,12 @@ use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
 #[cfg(target_arch = "x86_64")]
 pub use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
+use crate::util::u64_to_usize;
+
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
 
+/// Entry point to `revm` utilizing the REVM protocol.
 #[unsafe(no_mangle)]
 extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     let (generic_table, arch_table) = match validate_protocol_table(header_ptr) {
@@ -29,7 +32,8 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
 pub fn protocol_table() -> Option<&'static Header> {
     // SAFETY:
     //
-    // If [`PROTOCOL_TABLE`] contains a non-NULL pointer, it is a valid [`Header`] pointer.
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
     unsafe { PROTOCOL_TABLE.load(Ordering::Acquire).as_ref() }
 }
 
@@ -39,11 +43,11 @@ pub fn generic_table() -> Option<&'static GenericTable> {
 
     // SAFETY:
     //
-    // If [`PROTOCOL_TABLE`] contains a non-NULL pointer, it points to a valid [`GenericTable`]
-    // pointer.
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
     unsafe {
         (&raw const *header)
-            .wrapping_byte_add(header.generic_table_offset as usize)
+            .wrapping_byte_add(u64_to_usize(header.generic_table_offset))
             .cast::<GenericTable>()
             .as_ref()
     }
@@ -55,16 +59,18 @@ pub fn arch_table() -> Option<&'static ArchTable> {
 
     // SAFETY:
     //
-    // If [`PROTOCOL_TABLE`] contains a non-NULL pointer, it points to a valid [`ArchTable`]
-    // pointer.
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
     unsafe {
         (&raw const *header)
-            .wrapping_byte_add(header.arch_table_offset as usize)
+            .wrapping_byte_add(u64_to_usize(header.arch_table_offset))
             .cast::<ArchTable>()
             .as_ref()
     }
 }
 
+/// Validates that the REVM protocol table is properly formatted and the versions of the table and
+/// subtables are supported.
 fn validate_protocol_table(
     header_ptr: *mut HeaderV0,
 ) -> Result<(&'static GenericTable, &'static ArchTable), Status> {
@@ -87,18 +93,18 @@ fn validate_protocol_table(
     }
 
     // Check that the tables can fit within the provided size of the protocol table.
-    if (header_v0.generic_table_offset as usize)
+    if (u64_to_usize(header_v0.generic_table_offset))
         .checked_add(mem::size_of::<GenericTable>())
-        .is_none_or(|max_offset| max_offset > header_v0.length as usize)
-        || (header_v0.arch_table_offset as usize)
+        .is_none_or(|max_offset| max_offset > u64_to_usize(header_v0.length))
+        || (u64_to_usize(header_v0.arch_table_offset))
             .checked_add(mem::size_of::<ArchTable>())
-            .is_none_or(|max_offset| max_offset > header_v0.length as usize)
+            .is_none_or(|max_offset| max_offset > u64_to_usize(header_v0.length))
     {
         return Err(Status::INVALID_USAGE);
     }
 
     let generic_table = header_ptr
-        .wrapping_byte_add(header_v0.generic_table_offset as usize)
+        .wrapping_byte_add(u64_to_usize(header_v0.generic_table_offset))
         .cast::<GenericTableV0>();
     // SAFETY:
     //
@@ -111,7 +117,7 @@ fn validate_protocol_table(
     }
 
     let arch_table = header_ptr
-        .wrapping_byte_add(header_v0.arch_table_offset as usize)
+        .wrapping_byte_add(u64_to_usize(header_v0.arch_table_offset))
         .cast::<ArchTableV0>();
     // SAFETY:
     //
