@@ -10,7 +10,7 @@ use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
 #[cfg(target_arch = "x86_64")]
 pub use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
-use crate::util::u64_to_usize;
+use crate::{memory::initialize_memory_management, util::u64_to_usize};
 
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
@@ -32,6 +32,11 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
         "revm image virtual address: {:#x}",
         generic_table.image_virtual_address
     );
+
+    // SAFETY:
+    //
+    // This function has not been called yet and memory APIs have not been used yet.
+    unsafe { initialize_memory_management() }
 
     Status::SUCCESS
 }
