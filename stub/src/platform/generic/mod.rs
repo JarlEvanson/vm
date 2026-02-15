@@ -6,6 +6,8 @@ use core::{error, fmt, ptr::NonNull};
 use stub_api::{MemoryDescriptor, Status, TakeoverFlags};
 use sync::ControlledModificationCell;
 
+use crate::platform::memory_structs::{FrameRange, PhysicalAddress, VirtualAddress};
+
 /// The [`Platform`] implementation that is currently in use.
 static PLATFORM: ControlledModificationCell<Option<&'static dyn Platform>> =
     ControlledModificationCell::new(None);
@@ -66,7 +68,11 @@ pub(in crate::platform) trait Platform: Send + Sync {
     ///
     /// Returns [`OutOfMemory`] if the system cannot allocate the requested frames. This may not
     /// indicate memory exhaustion if [`AllocationPolicy::Any`] is not in use.
-    fn allocate_frames(&self, count: u64, policy: AllocationPolicy) -> Result<u64, OutOfMemory>;
+    fn allocate_frames(
+        &self,
+        count: u64,
+        policy: AllocationPolicy,
+    ) -> Result<FrameRange, OutOfMemory>;
 
     /// Allocates a region of `count` frames with a starting physical address being a multiple of
     /// `alignment` and the entire region in accordance with the provided [`AllocationPolicy`].
@@ -80,47 +86,40 @@ pub(in crate::platform) trait Platform: Send + Sync {
         count: u64,
         alignment: u64,
         policy: AllocationPolicy,
-    ) -> Result<u64, OutOfMemory> {
+    ) -> Result<FrameRange, OutOfMemory> {
         assert!(alignment.is_power_of_two());
 
-        if self.frame_size() >= alignment {
-            let address = self.allocate_frames(count, policy)?;
-
-            assert!(address.is_multiple_of(alignment));
-            Ok(address)
+        if alignment <= self.frame_size() {
+            self.allocate_frames(count, policy)
         } else {
             let total_count = alignment
                 .div_ceil(self.frame_size())
                 .checked_add(count)
                 .ok_or(OutOfMemory)?;
 
-            let address = self.allocate_frames(total_count, policy)?;
-            let end_address = address.wrapping_add(total_count.wrapping_mul(self.frame_size()));
+            let range = self.allocate_frames(total_count, policy)?;
 
-            let requested_region_start = address.next_multiple_of(alignment);
-            let requested_region_end =
-                requested_region_start.wrapping_add(count.wrapping_mul(self.frame_size()));
+            let requested_range_start = range.start().align_up(alignment);
+            let requested_range = FrameRange::new(requested_range_start, count);
 
-            let lower_size = requested_region_start.wrapping_sub(address);
-            let upper_size = end_address.wrapping_sub(requested_region_end);
+            let lower = range.split_at(requested_range.start()).unwrap().0;
+            let upper = range.split_at(requested_range.end()).unwrap().1;
 
-            if lower_size != 0 {
-                let lower_count = lower_size / self.frame_size();
+            if !lower.is_empty() {
                 // SAFETY:
                 //
                 // The region described was allocated by a call to [`Platform::allocate_frames()`].
-                unsafe { self.deallocate_frames(address, lower_count) };
+                unsafe { self.deallocate_frames(lower) };
             }
 
-            if upper_size != 0 {
-                let upper_count = upper_size / self.frame_size();
+            if !upper.is_empty() {
                 // SAFETY:
                 //
                 // The region described was allocated by a call to [`Platform::allocate_frames()`].
-                unsafe { self.deallocate_frames(requested_region_end, upper_count) };
+                unsafe { self.deallocate_frames(upper) };
             }
 
-            Ok(requested_region_start)
+            Ok(requested_range)
         }
     }
 
@@ -129,7 +128,7 @@ pub(in crate::platform) trait Platform: Send + Sync {
     /// # Safety
     ///
     /// These frames must have been allocated by a call to [`Platform::allocate_frames()`].
-    unsafe fn deallocate_frames(&self, physical_address: u64, count: u64);
+    unsafe fn deallocate_frames(&self, range: FrameRange);
 
     /// Returns the current physical [`MemoryMap`].
     ///
@@ -151,14 +150,14 @@ pub(in crate::platform) trait Platform: Send + Sync {
     ///
     /// This means that if `physical_address` is 1 byte from the top of a [`Platform::page_size()`]
     /// chunk, only 1 byte may be accessible.
-    fn map_temporary(&self, physical_address: u64) -> *mut u8;
+    fn map_temporary(&self, address: PhysicalAddress) -> *mut u8;
 
     /// Maps the physical memory region of `size` bytes into `revm-stub`'s virtual address space.
-    fn map_identity(&self, physical_address: u64, size: u64) -> *mut u8;
+    fn map_identity(&self, address: PhysicalAddress, size: u64) -> *mut u8;
 
     /// Returns the physical address associated with the provided `virtual_address` if the
     /// translation is valid. Otherwise, return [`None`].
-    fn translate_virtual(&self, virtual_address: usize) -> Option<u64>;
+    fn translate_virtual(&self, address: VirtualAddress) -> Option<u64>;
 
     /// Executes a takover on behalf of the loaded executable. `key` is utilized to ensure that the
     /// memory map that the loaded executable has is accurate.
@@ -171,22 +170,22 @@ pub(in crate::platform) trait Platform: Send + Sync {
     fn print(&self, args: fmt::Arguments);
 
     /// Returns the physical address of the UEFI system table, if present.
-    fn uefi_system_table(&self) -> Option<u64>;
+    fn uefi_system_table(&self) -> Option<PhysicalAddress>;
 
     /// Returns the physical address of the RSDP structure, if present.
-    fn rsdp(&self) -> Option<u64>;
+    fn rsdp(&self) -> Option<PhysicalAddress>;
 
     /// Returns the physical address of the XSDP structure, if present.
-    fn xsdp(&self) -> Option<u64>;
+    fn xsdp(&self) -> Option<PhysicalAddress>;
 
     /// Returns the physical address of the device tree structure, if present.
-    fn device_tree(&self) -> Option<u64>;
+    fn device_tree(&self) -> Option<PhysicalAddress>;
 
     /// Returns the physical address of the SMBIO 32 Entry Point, if present.
-    fn smbios_32(&self) -> Option<u64>;
+    fn smbios_32(&self) -> Option<PhysicalAddress>;
 
     /// Returns the physical address of the SMBIO 64 Entry Point, if present.
-    fn smbios_64(&self) -> Option<u64>;
+    fn smbios_64(&self) -> Option<PhysicalAddress>;
 }
 
 /// Structure controlling the behavior of [`Platform::allocate_frames()`].
