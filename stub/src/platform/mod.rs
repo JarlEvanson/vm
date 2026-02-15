@@ -12,6 +12,7 @@ mod memory_structs;
 mod relocation;
 mod uefi;
 
+pub use generic::*;
 pub use memory_structs::*;
 
 #[cfg(target_arch = "aarch64")]
