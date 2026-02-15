@@ -11,6 +11,8 @@ mod limine;
 mod relocation;
 mod uefi;
 
+pub use generic::*;
+
 #[cfg(target_arch = "aarch64")]
 core::arch::global_asm! {
     ".global main",
