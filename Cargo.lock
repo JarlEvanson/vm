@@ -130,6 +130,9 @@ version = "0.1.0"
 [[package]]
 name = "revm"
 version = "0.1.0"
+dependencies = [
+ "stub_api",
+]
 
 [[package]]
 name = "revm-stub"
