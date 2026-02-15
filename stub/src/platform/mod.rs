@@ -8,8 +8,11 @@ use crate::platform::uefi::uefi_main;
 mod generic;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 mod limine;
+mod memory_structs;
 mod relocation;
 mod uefi;
+
+pub use memory_structs::*;
 
 #[cfg(target_arch = "aarch64")]
 core::arch::global_asm! {
