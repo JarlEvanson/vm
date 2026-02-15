@@ -2,8 +2,12 @@
 
 use sync::ControlledModificationCell;
 
-use crate::{arch, memory::virt::initialize_virtual};
+use crate::{
+    arch,
+    memory::{general::initialize_allocator, virt::initialize_virtual},
+};
 
+pub mod general;
 pub mod phys;
 pub mod virt;
 
@@ -36,6 +40,12 @@ pub unsafe fn initialize_memory_management() {
     // This function was called before any memory APIs have been called and thus
     // [`initialize_virtual()`] will be called before any virtual memory API call occurs.
     unsafe { initialize_virtual() }
+
+    // SAFETY:
+    //
+    // This function was called before any memory APIs have been called and thus
+    // [`initialize_allocator()`] will be called before any SLAB subsystem call occurs.
+    unsafe { initialize_allocator() }
 }
 
 /// Returns the size, in bytes, of a page and frame.
