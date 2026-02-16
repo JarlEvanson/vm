@@ -2,3 +2,4 @@
 //! memory.
 
 pub mod phys;
+pub mod virt;
