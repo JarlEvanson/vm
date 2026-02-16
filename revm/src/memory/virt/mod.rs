@@ -2,17 +2,69 @@
 
 use core::{convert::Infallible, error, fmt};
 
+use sync::ControlledModificationCell;
+
 use crate::{
     arch::generic::memory::virt::FindFreeRegionError,
     memory::{
         page_frame_size,
-        phys::{FrameAllocationError, structs::FrameRange},
-        virt::structs::PageRange,
+        phys::{
+            FrameAllocationError,
+            structs::{Frame, FrameRange},
+        },
+        virt::structs::{Page, PageRange},
     },
     util::{u64_to_usize_panicking, usize_to_u64},
 };
 
 pub mod structs;
+
+/// The [`Page`] at which all temporary mappings will occur.
+static TEMPORARY_PAGE: ControlledModificationCell<Page> =
+    ControlledModificationCell::new(Page::zero());
+
+/// Initializes the virtual memory management subsystem for `revm`.
+///
+/// # Safety
+///
+/// This function must be called before any virtual memory APIs may be called and may only be
+/// called a single time.
+pub(in crate::memory) unsafe fn initialize_virtual() {
+    let generic_table = crate::stub_protocol::generic_table()
+        .expect("initialize_virtual() must be called before `takeover()`");
+
+    let stub_page_frame_count = u64_to_usize_panicking(
+        usize_to_u64(page_frame_size()).div_ceil(generic_table.page_frame_size),
+    );
+
+    let mut page = Page::zero().add(1);
+    loop {
+        // SAFETY:
+        //
+        // `generic_table()` returned a valid [`GenericTable`], so this function is required to be
+        // functional.
+        let result = unsafe {
+            (generic_table.map)(
+                Frame::zero().start_address().value(),
+                page.start_address().value(),
+                stub_page_frame_count,
+                stub_api::MapFlags::READ | stub_api::MapFlags::WRITE,
+            )
+        };
+        if result == stub_api::Status::SUCCESS {
+            // SAFETY:
+            //
+            // This function has been called before any virtual memory APIs have been called and
+            // thus currently has exclusive access to [`TEMPORARY_PAGE`].
+            unsafe { *TEMPORARY_PAGE.get_mut() = page }
+            return;
+        } else if result != stub_api::Status::OVERLAP {
+            crate::warn!("error while testing for free page: {result:?}");
+        }
+
+        page = page.add(1);
+    }
+}
 
 /// Maps a [`FrameRange`] into virtual memory at [`PageRange`] with normal caching.
 ///
@@ -178,6 +230,25 @@ pub unsafe fn unmap(page_range: PageRange) {
     } else {
         todo!("implement post-takeover page unmapping")
     }
+}
+
+/// Maps the [`Frame`] into memory temporarily.
+///
+/// Any call to [`map_temporary()`] invalidates the temporary mappings produced by any previous
+/// call to [`map_temporary()`].
+#[expect(clippy::missing_panics_doc)]
+pub fn map_temporary(frame: Frame) -> Page {
+    let frame_range = FrameRange::new(frame, 1);
+    let page_range = PageRange::new(*TEMPORARY_PAGE.get(), 1);
+
+    map_at_internal(
+        frame_range,
+        page_range,
+        Permissions::ReadWrite,
+        MappingType::Device,
+    )
+    .expect("failed to map temporary page");
+    page_range.start()
 }
 
 /// Various errors that can occur while mapping a [`FrameRange`] into memory.

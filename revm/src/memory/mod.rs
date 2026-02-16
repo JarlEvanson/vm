@@ -2,7 +2,7 @@
 
 use sync::ControlledModificationCell;
 
-use crate::arch;
+use crate::{arch, memory::virt::initialize_virtual};
 
 pub mod phys;
 pub mod virt;
@@ -30,6 +30,12 @@ pub unsafe fn initialize_memory_management() {
     // The invariants of this function ensure that [`PAGE_FRAME_SIZE`] will not be accessed for the
     // duration of this function and thus it is safe to modify [`PAGE_FRAME_SIZE`].
     unsafe { *PAGE_FRAME_SIZE.get_mut() = page_size }
+
+    // SAFETY:
+    //
+    // This function was called before any memory APIs have been called and thus
+    // [`initialize_virtual()`] will be called before any virtual memory API call occurs.
+    unsafe { initialize_virtual() }
 }
 
 /// Returns the size, in bytes, of a page and frame.
