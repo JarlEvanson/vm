@@ -5,7 +5,7 @@ use core::{convert::Infallible, error, fmt};
 use sync::ControlledModificationCell;
 
 use crate::{
-    arch::generic::memory::virt::FindFreeRegionError,
+    arch::{self, generic::memory::virt::FindFreeRegionError},
     memory::{
         page_frame_size,
         phys::{
@@ -64,6 +64,71 @@ pub(in crate::memory) unsafe fn initialize_virtual() {
 
         page = page.add(1);
     }
+}
+
+/// Maps a range of physical frames into virtual memory with normal caching.
+///
+/// This is typically used for physical memory corresponding to RAM.
+///
+/// # Errors
+///
+/// - [`MapError::FindFreeRegionError`]: Returned when `revm`'s virtual address space does not have
+///   a suitable [`PageRange`] for the requested mapping.
+/// - [`MapError::FrameAllocation`]: Returned when an error occurs when allocating [`Frame`]s that
+///   are required to map the requested [`FrameRange`].
+pub fn map(frame_range: FrameRange, permissions: Permissions) -> Result<PageRange, MapError> {
+    map_internal(frame_range, permissions, MappingType::Normal)
+}
+
+/// Maps a range of physical frames as non-cacheable memory.
+///
+/// Typically used for memory that should bypass the CPU cache (e.g., DMA buffers).
+///
+/// # Errors
+///
+/// - [`MapError::FindFreeRegionError`]: Returned when `revm`'s virtual address space does not have
+///   a suitable [`PageRange`] for the requested mapping.
+/// - [`MapError::FrameAllocation`]: Returned when an error occurs when allocating [`Frame`]s that
+///   are required to map the requested [`FrameRange`].
+pub fn map_noncacheable(
+    frame_range: FrameRange,
+    permissions: Permissions,
+) -> Result<PageRange, MapError> {
+    map_internal(frame_range, permissions, MappingType::NormalNoncacheable)
+}
+
+/// Maps a range of physical frames as device memory.
+///
+/// Suitable for memory-mapped device registers where normal caching is unsafe.
+///
+/// # Errors
+///
+/// - [`MapError::FindFreeRegionError`]: Returned when `revm`'s virtual address space does not have
+///   a suitable [`PageRange`] for the requested mapping.
+/// - [`MapError::FrameAllocation`]: Returned when an error occurs when allocating [`Frame`]s that
+///   are required to map the requested [`FrameRange`].
+pub fn map_device(
+    frame_range: FrameRange,
+    permissions: Permissions,
+) -> Result<PageRange, MapError> {
+    map_internal(frame_range, permissions, MappingType::Device)
+}
+
+/// Maps a range of physical frames with write-combining enabled.
+///
+/// Useful for framebuffers or other memory regions where write-combining improves performance.
+///
+/// # Errors
+///
+/// - [`MapError::FindFreeRegionError`]: Returned when `revm`'s virtual address space does not have
+///   a suitable [`PageRange`] for the requested mapping.
+/// - [`MapError::FrameAllocation`]: Returned when an error occurs when allocating [`Frame`]s that
+///   are required to map the requested [`FrameRange`].
+pub fn map_write_combining(
+    frame_range: FrameRange,
+    permissions: Permissions,
+) -> Result<PageRange, MapError> {
+    map_internal(frame_range, permissions, MappingType::WriteCombining)
 }
 
 /// Maps a [`FrameRange`] into virtual memory at [`PageRange`] with normal caching.
@@ -148,6 +213,24 @@ pub fn map_write_combining_at(
         permissions,
         MappingType::WriteCombining,
     )
+}
+
+/// Helper function that locates a free virtual [`PageRange`] and then calls [`map_at()`].
+///
+/// # Errors
+///
+/// - [`MapError::FindFreeRegionError`]: Returned when `revm`'s virtual address space does not have
+///   a suitable [`PageRange`] for the requested mapping.
+/// - [`MapError::FrameAllocation`]: Returned when an error occurs when allocating [`Frame`]s that
+///   are required to map the requested [`FrameRange`].
+fn map_internal(
+    frame_range: FrameRange,
+    permissions: Permissions,
+    mapping_type: MappingType,
+) -> Result<PageRange, MapError> {
+    let page_range = arch::find_free_region(u64_to_usize_panicking(frame_range.count()))?;
+
+    map_at_internal(frame_range, page_range, permissions, mapping_type)
 }
 
 /// Root function that maps the provided [`FrameRange`] into `revm`'s address space at
