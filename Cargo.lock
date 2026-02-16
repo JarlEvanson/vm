@@ -133,6 +133,9 @@ version = "0.1.0"
 dependencies = [
  "stub_api",
  "sync",
+ "x86_32",
+ "x86_64",
+ "x86_common",
 ]
 
 [[package]]
