@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
+    # Core libraries that provide useful abstractions for use in both `revm-stub` and `revm`.
+    "lib/core/conversion",
+
     "revm",
     "stub",
 
@@ -14,6 +17,8 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
+conversion = { path = "lib/core/conversion" }
+
 anyhow = "1.0"
 clap = "4.5"
 
