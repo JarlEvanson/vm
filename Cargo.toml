@@ -3,9 +3,11 @@ resolver = "3"
 members = [
     # Core libraries that provide useful abstractions for use in both `revm-stub` and `revm`.
     "lib/core/conversion",
+    "lib/core/memory",
 
     "lib/format/elf",
     "lib/format/pe",
+
 
     "revm",
     "stub",
@@ -21,9 +23,11 @@ repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
 conversion = { path = "lib/core/conversion" }
+memory = { path = "lib/core/memory" }
 
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
 
 anyhow = "1.0"
 clap = { version = "4.5", features = [ "env" ] }
