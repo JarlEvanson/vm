@@ -34,6 +34,10 @@ pub extern "C" fn limine_main() -> ! {
     }
 
     crate::debug!("Image Start: {:#x}", crate::util::image_start());
+    match crate::stub_main() {
+        Ok(()) => {}
+        Err(error) => crate::error!("error loading from Limine: {error}"),
+    };
 
     loop {
         core::hint::spin_loop()
