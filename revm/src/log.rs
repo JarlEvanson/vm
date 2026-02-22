@@ -83,6 +83,7 @@ struct LogImpl;
 
 impl fmt::Write for LogImpl {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        /*
         if let Some(generic_table) = generic_table() {
             // SAFETY:
             //
@@ -93,6 +94,12 @@ impl fmt::Write for LogImpl {
                 return Err(fmt::Error);
             }
         }
+        */
+
+        // SAFETY:
+        //
+        // TODO:
+        unsafe { x86_common::io_port::write_u8_slice(0xe9, s.as_bytes()) }
 
         Ok(())
     }
