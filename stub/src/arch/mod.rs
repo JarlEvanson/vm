@@ -12,3 +12,9 @@ pub mod paging {
         X86CommonScheme as ArchScheme, X86CommonSchemeError as ArchSchemeError,
     };
 }
+
+/// Architecture-dependent relocation code.
+pub mod relocation {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub use super::x86_common::relocation::{read_size, relocate};
+}
