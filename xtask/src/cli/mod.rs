@@ -3,13 +3,14 @@
 use clap::Command;
 
 use crate::cli::{
-    build_revm::BuildRevmConfig, build_stub::BuildStubConfig, clippy::ClippyConfig,
+    build_revm::BuildRevmConfig, build_stub::BuildStubConfig, clippy::ClippyConfig, doc::DocConfig,
     package::PackageConfig, run::RunConfig,
 };
 
 pub mod build_revm;
 pub mod build_stub;
 pub mod clippy;
+pub mod doc;
 pub mod package;
 pub mod run;
 
@@ -26,6 +27,8 @@ pub enum Action {
     Run(RunConfig),
     /// Runs `cargo clippy` on all packages.
     Clippy(ClippyConfig),
+    /// Runs `cargo doc` on all packages.
+    Doc(DocConfig),
 }
 
 /// Parses `xtask`'s arguments to construct an [`Action`].
@@ -41,6 +44,7 @@ pub fn get_action() -> Action {
         "package" => Action::Package(package::parse_arguments(subcommand_matches)),
         "run" => Action::Run(run::parse_arguments(subcommand_matches)),
         "clippy" => Action::Clippy(clippy::parse_arguments(subcommand_matches)),
+        "doc" => Action::Doc(doc::parse_arguments(subcommand_matches)),
         _ => unreachable!("unexpected subcommand: {subcommand_name:?}"),
     }
 }
@@ -54,6 +58,7 @@ fn command_parser() -> Command {
         .subcommand(package::subcommand_parser())
         .subcommand(run::subcommand_parser())
         .subcommand(clippy::subcommand_parser())
+        .subcommand(doc::subcommand_parser())
         .subcommand_required(true)
         .arg_required_else_help(true)
 }
