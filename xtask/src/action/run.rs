@@ -100,7 +100,10 @@ path: boot():/revm.efi
         }
         Arch::X86_32 | Arch::X86_64 => {
             cmd.args(["-machine", "q35"]);
-            cmd.args(["-cpu", "max"]);
+            cmd.args(["-cpu", "host", "-enable-kvm"]);
+
+            cmd.arg("-debugcon")
+                .arg(format!("file:{}/debugcon.txt", run_dir.display()));
         }
     }
 

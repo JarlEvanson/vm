@@ -4,6 +4,7 @@ use core::ptr::NonNull;
 
 use crate::memory::general::slab::MAX_SIZE_CLASS;
 
+pub mod page;
 pub mod slab;
 
 /// Initializes the general purpose memory allocator for `revm`.
@@ -25,7 +26,7 @@ pub fn allocate(size: usize, alignment: usize) -> Option<NonNull<u8>> {
     if size <= *MAX_SIZE_CLASS.get() && alignment <= *MAX_SIZE_CLASS.get() {
         slab::allocate(size.max(alignment))
     } else {
-        todo!("implement page-sized allocation");
+        page::allocate(size, alignment)
     }
 }
 
@@ -38,8 +39,12 @@ pub fn allocate(size: usize, alignment: usize) -> Option<NonNull<u8>> {
 /// allocated block of memory.
 pub unsafe fn deallocate(ptr: NonNull<u8>, size: usize, alignment: usize) {
     if size <= *MAX_SIZE_CLASS.get() && alignment <= *MAX_SIZE_CLASS.get() {
-        crate::warn!("implement slab deallocation")
+        // SAFETY:
+        //
+        // The invariants of [`deallocate()`] ensure that it is safe to call
+        // [`slab::deallocate()`].
+        unsafe { slab::deallocate(ptr, size.max(alignment)) }
     } else {
-        crate::warn!("implement page-sized deallocation")
+        crate::debug!("implement page-sized deallocation")
     }
 }

@@ -6,7 +6,7 @@ use core::{
     slice,
 };
 
-use sync::{ControlledModificationCell, RawSpinlock, Spinlock};
+use sync::{ControlledModificationCell, Spinlock};
 
 use crate::{
     memory::{
@@ -166,6 +166,16 @@ pub fn allocate(size: usize) -> Option<NonNull<u8>> {
     }
 }
 
+/// Deallocates the provided `ptr` that refers to `size` bytes.
+///
+/// # Safety
+///
+/// The provided `ptr` must be an active allocation and must not be used after the start of this
+/// function. `size` must be accurate.
+pub unsafe fn deallocate(ptr: NonNull<u8>, size: usize) {
+    crate::debug!("implement slab-sized deallocation");
+}
+
 fn calculate_cache_index(size: usize) -> usize {
     u32_to_usize(
         size.next_power_of_two()
@@ -217,7 +227,8 @@ impl Slab {
             .start_address()
             .add(mem::size_of::<Slab>())
             .align_up(object_size);
-        let end = page_range.end().end_address();
+        // Use start address since [`PageRange::end()`] returns an exclusive end.
+        let end = page_range.end().start_address();
 
         let mut head: *mut FreeObject = ptr::null_mut();
         while current < end {

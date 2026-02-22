@@ -53,6 +53,10 @@ macro_rules! error {
 
 #[doc(hidden)]
 pub fn _log(level: LogLevel, args: fmt::Arguments) {
+    if level < LogLevel::Info {
+        return;
+    }
+
     // Ignore any logging errors because there is no method to report or deal with them.
     let _ = match level {
         LogLevel::Trace => LogImpl.write_fmt(format_args!("TRACE: {args}\n")),
@@ -93,6 +97,11 @@ impl fmt::Write for LogImpl {
                 return Err(fmt::Error);
             }
         }
+
+        // SAFETY:
+        //
+        // TODO:
+        unsafe { x86_common::io_port::write_u8_slice(0xe9, s.as_bytes()) }
 
         Ok(())
     }

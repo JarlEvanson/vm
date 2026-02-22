@@ -10,6 +10,12 @@ pub mod memory;
 pub mod stub_protocol;
 pub mod util;
 
+mod acpi;
+
+fn revm_main() {
+    acpi::initialize();
+}
+
 /// Generic handler for panics.
 #[panic_handler]
 #[cfg(not(test))]

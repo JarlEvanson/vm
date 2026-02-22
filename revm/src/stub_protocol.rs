@@ -38,6 +38,7 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     // This function has not been called yet and memory APIs have not been used yet.
     unsafe { initialize_memory_management() }
 
+    crate::revm_main();
     Status::SUCCESS
 }
 

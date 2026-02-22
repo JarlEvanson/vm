@@ -10,6 +10,8 @@ repository.workspace = true
 stub_api.workspace = true
 sync.workspace = true
 
+uacpi-sys = { git = "https://github.com/JarlEvanson/uacpi.git", features = [ "sized-frees" ] }
+
 [target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
 x86_32.workspace = true
 x86_64.workspace = true

@@ -269,7 +269,7 @@ pub fn print(args: fmt::Arguments) {
 
 #[doc(hidden)]
 pub fn _log(level: LogLevel, args: fmt::Arguments) {
-    if level >= LogLevel::Trace {
+    if level >= LogLevel::Info {
         match level {
             LogLevel::Trace => platform().print(format_args!("TRACE: {args}\n")),
             LogLevel::Debug => platform().print(format_args!("DEBUG: {args}\n")),
