@@ -6,22 +6,39 @@ use core::{error, fmt};
 
 use sync::Spinlock;
 
+use crate::executable::LoadExecutableError;
+
 pub mod arch;
+pub mod executable;
 pub mod platform;
 pub mod util;
 
 /// Entry point used after all boot protocol and architecture specific code has been run.
 fn stub_main() -> Result<(), StubError> {
+    let (scheme, entry_point, image_allocation, slide) = executable::load()?;
+    crate::debug!("Executable Entry Point: {entry_point:#x}");
+
     Ok(())
 }
 
 /// Various errors that can occur in the architecture-independent phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StubError {}
+enum StubError {
+    /// An error occurred while loading the executable.
+    LoadExecutableError(LoadExecutableError),
+}
+
+impl From<LoadExecutableError> for StubError {
+    fn from(error: LoadExecutableError) -> Self {
+        Self::LoadExecutableError(error)
+    }
+}
 
 impl fmt::Display for StubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {}
+        match *self {
+            Self::LoadExecutableError(error) => write!(f, "error loading the executable: {error}"),
+        }
     }
 }
 
