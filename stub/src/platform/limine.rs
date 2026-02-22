@@ -1,8 +1,17 @@
 //! Support for booting from the Limine boot protocol.
 
-use core::{fmt::Write, ptr, slice};
+use core::{
+    fmt::{self, Write},
+    ptr::{self, NonNull},
+    slice,
+    sync::atomic::Ordering,
+};
 
-use conversion::u64_to_usize;
+use conversion::{u64_to_usize, usize_to_u64};
+#[cfg(target_arch = "aarch64")]
+use limine::mp::aarch64::{MpInfo, MpResponse};
+#[cfg(target_arch = "x86_64")]
+use limine::mp::x86_64::{MpInfo, MpResponse};
 use limine::{
     BaseRevisionTag, RequestsEndMarker, RequestsStartMarker,
     device_tree::{DEVICE_TREE_REQUEST_MAGIC, DeviceTreeRequest},
@@ -10,16 +19,33 @@ use limine::{
     executable_addr::{EXECUTABLE_ADDRESS_REQUEST_MAGIC, ExecutableAddressRequest},
     framebuffer::{FRAMEBUFFER_REQUEST_MAGIC, FramebufferRequest, FramebufferV0},
     hhdm::{HHDM_REQUEST_MAGIC, HhdmRequest},
-    memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest},
+    memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest, MemoryType},
+    mp::{MP_REQUEST_MAGIC, MpRequest, MpRequestFlags},
     rsdp::{RSDP_REQUEST_MAGIC, RsdpRequest},
     smbios::{SMBIOS_REQUEST_MAGIC, SmbiosRequest},
 };
-use sync::ControlledModificationCell;
+use memory::{
+    address::{
+        AddressChunk, AddressChunkRange, FrameRange, PhysicalAddress, PhysicalAddressRange,
+        VirtualAddress,
+    },
+    translation::{MapFlags, TranslationScheme},
+};
+use stub_api::{Flags, MemoryDescriptor, Status, TakeoverFlags};
+use sync::{ControlledModificationCell, Spinlock};
 
-use crate::platform::graphics::{
-    console::Console,
-    font::{FONT_MAP, GLYPH_ARRAY},
-    surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
+use crate::{
+    arch::paging::ArchScheme,
+    platform::{
+        AllocationPolicy, BufferTooSmall, MemoryMap, OutOfMemory, Platform, Procedure, allocator,
+        frame_allocator, frame_size,
+        graphics::{
+            console::Console,
+            font::{FONT_MAP, GLYPH_ARRAY},
+            surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
+        },
+        platform_initialize,
+    },
 };
 
 /// Indicates the start of the Limine boot protocol request zone.
@@ -113,6 +139,17 @@ static FRAMEBUFFER_REQUEST: ControlledModificationCell<FramebufferRequest> =
         response: ptr::null_mut(),
     });
 
+/// Request for the other processors to be initialized and waiting on a spinloop.
+#[used]
+#[unsafe(link_section = ".limine.requests")]
+static MP_REQUST: ControlledModificationCell<MpRequest> =
+    ControlledModificationCell::new(MpRequest {
+        id: MP_REQUEST_MAGIC,
+        revision: 0,
+        response: ptr::null_mut(),
+        flags: MpRequestFlags::DEFAULT,
+    });
+
 /// Indicates the end of the Limine boot protocol request zone.
 #[used]
 #[unsafe(link_section = ".limine.end")]
@@ -133,6 +170,15 @@ static EXECUTABLE_PHYSICAL_BASE: ControlledModificationCell<u64> =
 /// The [`FramebufferV0`]s provided by [`FRAMEBUFFER_REQUEST`].
 static FRAMEBUFFERS: ControlledModificationCell<&[&FramebufferV0]> =
     ControlledModificationCell::new(&[]);
+/// The [`MpInfo`] structures representing all CPUs available on the system.
+static CPUS: ControlledModificationCell<&[&MpInfo]> = ControlledModificationCell::new(&[]);
+/// The [`MpInfo`] associated with the primary processor.
+static BSP: ControlledModificationCell<Option<&MpInfo>> = ControlledModificationCell::new(None);
+
+/// The [`LimineSurface`] that used to output logs.
+static FRAMEBUFFER: Spinlock<Option<Console<LimineSurface>>> = Spinlock::new(None);
+/// The [`TranslationScheme`] used to implement page mapping and unmapping.
+static ADDRESS_IMPL: Spinlock<Option<ArchScheme>> = Spinlock::new(None);
 
 /// Entry point for Rust when booted using the Limine boot protocol.
 pub extern "C" fn limine_main() -> ! {
@@ -143,6 +189,7 @@ pub extern "C" fn limine_main() -> ! {
         executable_physical_base,
         executable_virtual_base,
         framebuffers,
+        cpu_info_buffer,
     ) = validate_required_tables();
 
     // SAFETY:
@@ -157,14 +204,455 @@ pub extern "C" fn limine_main() -> ! {
         *FRAMEBUFFERS.get_mut() = framebuffers;
     }
 
+    // SAFETY:
+    //
+    // Exclusive control over the first [`LimineSurface`]s has been granted to [`FRAMEBUFFER`].
+    *FRAMEBUFFER.lock() = unsafe {
+        framebuffers
+            .first()
+            .and_then(|framebuffer| LimineSurface::new(framebuffer))
+            .map(|surface| Console::new(surface, GLYPH_ARRAY, FONT_MAP, 0xFF_FF_FF_FF, 0x00))
+    };
+
+    // SAFETY:
+    //
+    // [`CPUS`] will not be accessed until [`Platform`] is initialized, which is after this
+    // operation finishes.
+    unsafe { *CPUS.get_mut() = cpu_info_buffer };
+
+    // SAFETY:
+    //
+    // This call is made before any calls to [`Platform`] APIs are made and there is no
+    // multi-theading at this point.
+    unsafe { platform_initialize(&Limine) };
+    frame_allocator::initialize(memory_map_entries.iter().map(|entry| {
+        let start = entry.base;
+        let end = entry.base.strict_add(entry.length);
+
+        let (start, end) = if entry.mem_type == MemoryType::USABLE {
+            (
+                start.next_multiple_of(frame_size()),
+                (end / frame_size()) * frame_size(),
+            )
+        } else {
+            (
+                (start / frame_size()) * frame_size(),
+                end.next_multiple_of(frame_size()),
+            )
+        };
+
+        let region_type = match entry.mem_type {
+            MemoryType::RESERVED => stub_api::MemoryType::RESERVED,
+            MemoryType::USABLE => stub_api::MemoryType::FREE,
+            MemoryType::BOOTLOADER_RECLAIMABLE => stub_api::MemoryType::BOOTLOADER_RECLAIMABLE,
+            MemoryType::EXECUTABLE_AND_MODULES => stub_api::MemoryType::BOOTLOADER_RECLAIMABLE,
+            MemoryType::BAD_MEMORY => stub_api::MemoryType::BAD,
+            MemoryType::ACPI_RECLAIMABLE => stub_api::MemoryType::ACPI_RECLAIMABLE,
+            MemoryType::ACPI_TABLES => stub_api::MemoryType::ACPI_RECLAIMABLE,
+            MemoryType::ACPI_NVS => stub_api::MemoryType::ACPI_NON_VOLATILE,
+            _ => stub_api::MemoryType::RESERVED,
+        };
+        MemoryDescriptor {
+            number: start / frame_size(),
+            count: (end - start) / frame_size(),
+            region_type,
+        }
+    }));
+    // SAFETY:
+    //
+    // [`allocator::MAP`] will not be modified after this call.
+    unsafe { *allocator::MAP.get_mut() = Some(map) };
+
+    // SAFETY:
+    //
+    // [`allocator::UNMAP`] will not be modified after this call.
+    unsafe { *allocator::UNMAP.get_mut() = Some(unmap) };
+
+    let mut address_impl = ADDRESS_IMPL.lock();
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        // SAFETY:
+        //
+        // This takeover of [`ArchAddressSpace`] is only performed once and this program has exclusive
+        // control over the system.
+        let scheme =
+            unsafe { ArchScheme::active_current().expect("failed to initialize address space") };
+        *address_impl = Some(scheme);
+    }
+
+    drop(address_impl);
+
+    if !cpu_info_buffer.is_empty() {
+        for (index, cpu_info) in cpu_info_buffer.iter().enumerate() {
+            cpu_info
+                .extra_argument
+                .store(usize_to_u64(index), Ordering::Relaxed);
+            cpu_info.goto_address.store(
+                usize_to_u64(ap_loop as *const () as usize),
+                Ordering::Relaxed,
+            );
+        }
+
+        loop {
+            let mut all = 0;
+            for cpu in CPUS.get().iter() {
+                if cpu.goto_address.load(Ordering::Acquire) == 0 {
+                    all += 1;
+                }
+            }
+
+            if all + 1 == CPUS.get().len() {
+                break;
+            }
+        }
+
+        'proc_loop: {
+            for cpu in CPUS.get().iter() {
+                if cpu.goto_address.load(Ordering::Acquire) != 0 {
+                    // SAFETY:
+                    //
+                    // No calls to [`run_on_all_processors`] have been made.
+                    unsafe { *BSP.get_mut() = Some(*cpu) }
+                    let proc_id = cpu.extra_argument.swap(0, Ordering::AcqRel);
+
+                    cpu.goto_address.store(proc_id, Ordering::Release);
+                    break 'proc_loop;
+                }
+            }
+
+            unreachable!()
+        }
+    }
+
     crate::debug!("Image Start: {:#x}", crate::util::image_start());
     match crate::stub_main() {
         Ok(()) => {}
         Err(error) => crate::error!("error loading from Limine: {error}"),
     };
 
+    crate::info!("REVM finished: shutdown manually");
     loop {
         core::hint::spin_loop()
+    }
+}
+
+/// Implementation of acquiring a CPU ID number and waiting for functions to run.
+extern "C" fn ap_loop(mp_info: &'static MpInfo) -> ! {
+    let cpu_id = mp_info.extra_argument.swap(0, Ordering::Relaxed);
+    mp_info.goto_address.store(0, Ordering::Release);
+
+    loop {
+        let mut next_func;
+        loop {
+            next_func = mp_info.extra_argument.load(Ordering::Acquire);
+            if next_func != 0 {
+                break;
+            }
+        }
+
+        let func_description_ptr = u64_to_usize(next_func) as *mut (Procedure, *mut ());
+        // SAFETY:
+        //
+        // The AP calling convention ensures that `func_description_ptr` is properly initialized
+        // and points to an address that outlasts all processors running `ap_loop`.
+        let (func, arg) = unsafe { *func_description_ptr };
+        func(cpu_id, arg);
+        mp_info.extra_argument.store(0, Ordering::Release);
+    }
+}
+
+/// Implementation of [`Platform`] for Limine.
+pub struct Limine;
+
+impl Platform for Limine {
+    fn allocate(&self, size: usize, alignment: usize) -> Option<NonNull<u8>> {
+        allocator::allocate(size, alignment)
+    }
+
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, size: usize, alignment: usize) {
+        // SAFETY:
+        //
+        // The invariants of this function fulfill the invariants of the called function.
+        unsafe { allocator::deallocate(ptr, size, alignment) }
+    }
+
+    fn frame_size(&self) -> u64 {
+        4096
+    }
+
+    fn allocate_frames(
+        &self,
+        count: u64,
+        policy: AllocationPolicy,
+    ) -> Result<FrameRange, OutOfMemory> {
+        frame_allocator::allocate_frames(count, policy)
+    }
+
+    unsafe fn deallocate_frames(&self, range: FrameRange) {
+        // SAFETY:
+        //
+        // The invariants of this function fulfill the invariants of the called function.
+        unsafe { frame_allocator::deallocate_frames(range) }
+    }
+
+    fn memory_map<'buffer>(
+        &self,
+        buffer: &'buffer mut [MemoryDescriptor],
+    ) -> Result<MemoryMap<'buffer>, BufferTooSmall> {
+        frame_allocator::memory_map(buffer)
+    }
+
+    fn page_size(&self) -> usize {
+        4096
+    }
+
+    fn map_temporary(&self, address: PhysicalAddress) -> *mut u8 {
+        let hhdm_offset = *HHDM_OFFSET.get();
+        for entry in MEMORY_MAP_ENTRIES.get().iter() {
+            match entry.mem_type {
+                MemoryType::USABLE
+                | MemoryType::BOOTLOADER_RECLAIMABLE
+                | MemoryType::EXECUTABLE_AND_MODULES
+                | MemoryType::FRAMEBUFFER
+                | MemoryType::ACPI_TABLES
+                | MemoryType::ACPI_RECLAIMABLE
+                | MemoryType::ACPI_NVS => {}
+                _ => continue,
+            }
+
+            let entry_start = entry.base;
+            let entry_end = entry_start.strict_add(entry.length);
+            if entry_start <= address.value() && address.value() < entry_end {
+                return ptr::with_exposed_provenance_mut(u64_to_usize(
+                    address.value().strict_add(hhdm_offset),
+                ));
+            }
+        }
+
+        todo!("implement arbitary memory mapping")
+    }
+
+    fn map_identity(&self, range: PhysicalAddressRange) -> *mut u8 {
+        let mut lock = ADDRESS_IMPL.lock();
+        let Some(address_impl) = lock.as_mut() else {
+            unreachable!("ADDRESS_IMPL was not initialized");
+        };
+
+        let page_count = range.count().div_ceil(usize_to_u64(self.page_size()));
+        let range = AddressChunkRange::new(
+            AddressChunk::containing_address(range.start().to_address(), address_impl.chunk_size()),
+            page_count,
+        );
+
+        // SAFETY:
+        //
+        // The application requested such a mapping.
+        unsafe {
+            address_impl
+                .map(
+                    range,
+                    range,
+                    MapFlags::READ | MapFlags::WRITE | MapFlags::EXEC,
+                )
+                .expect("failed to perform mapping");
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        for chunk in range.iter() {
+            let virtual_address = chunk.start_address(address_impl.chunk_size());
+            x86_common::paging::tlb::invalidate_page(u64_to_usize(virtual_address.value()));
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        compile_error!("implement TLB invalidation");
+
+        ptr::with_exposed_provenance_mut(u64_to_usize(
+            range
+                .start()
+                .start_address(address_impl.chunk_size())
+                .value(),
+        ))
+    }
+
+    fn translate_virtual(&self, virtual_address: VirtualAddress) -> Option<PhysicalAddress> {
+        let virtual_address_u64 = virtual_address.to_address().value();
+
+        let hhdm_offset = *HHDM_OFFSET.get();
+        for entry in MEMORY_MAP_ENTRIES.get().iter() {
+            match entry.mem_type {
+                MemoryType::USABLE
+                | MemoryType::BOOTLOADER_RECLAIMABLE
+                | MemoryType::EXECUTABLE_AND_MODULES
+                | MemoryType::FRAMEBUFFER
+                | MemoryType::ACPI_TABLES
+                | MemoryType::ACPI_RECLAIMABLE
+                | MemoryType::ACPI_NVS => {}
+                _ => continue,
+            }
+
+            let entry_virtual_start = entry.base.strict_add(hhdm_offset);
+            let entry_virtual_end = entry_virtual_start.strict_add(entry.length);
+            if entry_virtual_start <= virtual_address_u64 && virtual_address_u64 < entry_virtual_end
+            {
+                return Some(PhysicalAddress::new(
+                    virtual_address_u64.strict_sub(hhdm_offset),
+                ));
+            }
+        }
+
+        let virtual_base = *EXECUTABLE_VIRTUAL_BASE.get();
+        let physical_base = *EXECUTABLE_PHYSICAL_BASE.get();
+        if virtual_address_u64 >= virtual_base {
+            return Some(PhysicalAddress::new(
+                virtual_address_u64
+                    .wrapping_sub(virtual_base)
+                    .wrapping_add(physical_base),
+            ));
+        }
+
+        let lock = ADDRESS_IMPL.lock();
+        let Some(address_impl) = lock.as_ref() else {
+            unreachable!("ADDRESS_IMPL was not initialized");
+        };
+
+        address_impl
+            .translate_input(virtual_address.to_address())
+            .map(|result| PhysicalAddress::new(result.0.value()))
+    }
+
+    fn takeover(&self, key: u64, flags: TakeoverFlags) -> Status {
+        todo!("{key:#x} {flags:?}")
+    }
+
+    fn cpu_count(&self) -> u64 {
+        usize_to_u64(CPUS.get().len()).max(1)
+    }
+
+    fn main_processor_id(&self) -> u64 {
+        let proc = BSP.get().expect("failure in initialization");
+        proc.goto_address.load(Ordering::Relaxed)
+    }
+
+    fn run_on_all_processors(&self, procedure: Procedure, argument: *mut ()) {
+        if CPUS.get().len() > 1 {
+            let proc = BSP.get().expect("failure in initialization");
+            let proc_id = self.main_processor_id();
+
+            let func_description = (procedure, argument);
+            {
+                for cpu in CPUS.get().iter() {
+                    assert_eq!(
+                        cpu.extra_argument.load(Ordering::Acquire),
+                        0,
+                        "all CPUs have not finished"
+                    );
+                }
+                for cpu in CPUS.get().iter() {
+                    cpu.extra_argument.store(
+                        usize_to_u64(ptr::from_ref(&func_description).addr()),
+                        Ordering::Release,
+                    )
+                }
+
+                procedure(proc_id, argument);
+                proc.extra_argument.store(0, Ordering::Release);
+
+                loop {
+                    let mut all = 0;
+                    for cpu in CPUS.get().iter() {
+                        if cpu.extra_argument.load(Ordering::Acquire) == 0 {
+                            all += 1;
+                        }
+                    }
+
+                    if all == CPUS.get().len() {
+                        break;
+                    }
+                }
+            }
+            core::hint::black_box(func_description);
+        } else {
+            // Single-threaded.
+            procedure(0, argument)
+        }
+    }
+
+    fn print(&self, args: fmt::Arguments) {
+        if let Some(console) = FRAMEBUFFER.lock().as_mut() {
+            let _ = write!(console, "{args}");
+        }
+    }
+
+    fn flags(&self) -> Flags {
+        Flags(0)
+    }
+
+    fn uefi_system_table(&self) -> Option<PhysicalAddress> {
+        let uefi_system_table_response_ptr = UEFI_SYSTEM_TABLE_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let uefi_system_table_response = unsafe { uefi_system_table_response_ptr.as_ref()? };
+        self.translate_virtual(VirtualAddress::new(u64_to_usize(
+            uefi_system_table_response.address,
+        )))
+    }
+
+    fn rsdp(&self) -> Option<PhysicalAddress> {
+        let rsdp_response_ptr = RSDP_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let rsdp_response = unsafe { rsdp_response_ptr.as_ref()? };
+        self.translate_virtual(VirtualAddress::new(u64_to_usize(rsdp_response.address)))
+    }
+
+    fn xsdp(&self) -> Option<PhysicalAddress> {
+        let rsdp_response_ptr = RSDP_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let rsdp_response = unsafe { rsdp_response_ptr.as_ref()? };
+        self.translate_virtual(VirtualAddress::new(u64_to_usize(rsdp_response.address)))
+    }
+
+    fn device_tree(&self) -> Option<PhysicalAddress> {
+        let device_tree_response_ptr = DEVICE_TREE_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let device_tree_response = unsafe { device_tree_response_ptr.as_ref()? };
+        self.translate_virtual(VirtualAddress::new(device_tree_response.dtb_ptr.addr()))
+    }
+
+    fn smbios_32(&self) -> Option<PhysicalAddress> {
+        let smbios_response_ptr = SMBIOS_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let smbios_response = unsafe { smbios_response_ptr.as_ref()? };
+        Some(PhysicalAddress::new(smbios_response.entry_32))
+    }
+
+    fn smbios_64(&self) -> Option<PhysicalAddress> {
+        let smbios_response_ptr = SMBIOS_REQUEST.get().response;
+        // SAFETY:
+        //
+        // The Limine bootloader specification states that if the request pointer
+        // changes, the request has been fulfilled. Since the request was initialized to
+        // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+        let smbios_response = unsafe { smbios_response_ptr.as_ref()? };
+        Some(PhysicalAddress::new(smbios_response.entry_64))
     }
 }
 
@@ -176,6 +664,7 @@ fn validate_required_tables() -> (
     u64,
     u64,
     &'static [&'static FramebufferV0],
+    &'static [&'static MpInfo],
 ) {
     let base_revision_tag = BASE_REVISION_TAG.get();
     if !base_revision_tag.is_supported() {
@@ -254,12 +743,38 @@ fn validate_required_tables() -> (
         &[]
     };
 
+    #[cfg(target_arch = "aarch64")]
+    let mp_response_ptr = MP_REQUST.get().response.cast::<MpResponse>();
+    #[cfg(target_arch = "x86_64")]
+    let mp_response_ptr = MP_REQUST.get().response.cast::<MpResponse>();
+
+    // SAFETY:
+    //
+    // The Limine bootloader specification states that if the [`MP_REQUST`] pointer
+    // changes, the request has been fulfilled. Since `mp_response_ptr` was
+    // initialized to `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid
+    // pointer.
+    let cpu_info_buffer = if let Some(mp_response) = unsafe { mp_response_ptr.as_ref() } {
+        // SAFETY:
+        //
+        // The Limine protocol specification specifies that this operation must be valid.
+        unsafe {
+            slice::from_raw_parts(
+                mp_response.cpus.cast::<&'static MpInfo>(),
+                u64_to_usize(mp_response.cpu_count),
+            )
+        }
+    } else {
+        &[]
+    };
+
     (
         memory_map_entries,
         hhdm_response.offset,
         executable_address_response.physical_base,
         executable_address_response.virtual_base,
         framebuffers,
+        cpu_info_buffer,
     )
 }
 
@@ -481,8 +996,54 @@ const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
     (extracted_value as u64 * max_value_foreign) / 255
 }
 
+/// Maps the provided physical_address into virtual memory.
+fn map(physical_address: PhysicalAddress, _size: u64) -> Option<NonNull<u8>> {
+    let hhdm_response_ptr = HHDM_REQUEST.get().response;
+    // SAFETY:
+    //
+    // The Limine bootloader specification states that if the [`HHDM_REQUEST`] pointer
+    // changes, the request has been fulfilled. Since `hhdm_response_ptr` was initialized to
+    // `ptr::null_mut()`, if it is not `ptr::null_mut()`, it must be a valid pointer.
+    let Some(hhdm_response) = (unsafe { hhdm_response_ptr.as_ref() }) else {
+        panic!("Limine higher half direct map was not provided");
+    };
+    let hhdm_offset = hhdm_response.offset;
+
+    for entry in MEMORY_MAP_ENTRIES.get().iter() {
+        match entry.mem_type {
+            MemoryType::USABLE
+            | MemoryType::BOOTLOADER_RECLAIMABLE
+            | MemoryType::EXECUTABLE_AND_MODULES
+            | MemoryType::FRAMEBUFFER
+            | MemoryType::ACPI_TABLES
+            | MemoryType::ACPI_RECLAIMABLE
+            | MemoryType::ACPI_NVS => {}
+            _ => continue,
+        }
+
+        let entry_start = entry.base;
+        let entry_end = entry_start.strict_add(entry.length);
+        if entry_start <= physical_address.value() && physical_address.value() < entry_end {
+            return NonNull::new(ptr::with_exposed_provenance_mut(u64_to_usize(
+                physical_address.value().strict_add(hhdm_offset),
+            )));
+        }
+    }
+
+    todo!("implement additional map functions")
+}
+
+/// No-op.
+///
+/// # Safety
+///
+/// This function does nothing and so is always safe.
+unsafe fn unmap(_: NonNull<u8>, _: u64) {}
+
 /// The Limine boot protocol-specific panic handler.
 fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    crate::error!("{info}");
+
     let framebuffers = if FRAMEBUFFERS.get().is_empty() {
         let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
 
@@ -506,7 +1067,8 @@ fn panic_handler(info: &core::panic::PanicInfo) -> ! {
         FRAMEBUFFERS.get()
     };
 
-    for framebuffer in framebuffers {
+    let skip_amount = if FRAMEBUFFER.lock().is_some() { 1 } else { 0 };
+    for framebuffer in framebuffers.iter().skip(skip_amount) {
         // SAFETY:
         //
         // We are panicking: we steal control over the framebuffers and overwrite all data.
