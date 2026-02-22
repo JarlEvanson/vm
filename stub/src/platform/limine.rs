@@ -1,6 +1,6 @@
 //! Support for booting from the Limine boot protocol.
 
-use core::{ptr, slice};
+use core::{fmt::Write, ptr, slice};
 
 use conversion::u64_to_usize;
 use limine::{
@@ -8,7 +8,7 @@ use limine::{
     device_tree::{DEVICE_TREE_REQUEST_MAGIC, DeviceTreeRequest},
     efi_sys_table::{EFI_SYSTEM_TABLE_REQUEST_MAGIC, EfiSystemTableRequest},
     executable_addr::{EXECUTABLE_ADDRESS_REQUEST_MAGIC, ExecutableAddressRequest},
-    framebuffer::FramebufferV0,
+    framebuffer::{FRAMEBUFFER_REQUEST_MAGIC, FramebufferRequest, FramebufferV0},
     hhdm::{HHDM_REQUEST_MAGIC, HhdmRequest},
     memory_map::{MEMORY_MAP_REQUEST_MAGIC, MemoryMapEntry, MemoryMapRequest},
     rsdp::{RSDP_REQUEST_MAGIC, RsdpRequest},
@@ -16,8 +16,10 @@ use limine::{
 };
 use sync::ControlledModificationCell;
 
-use crate::platform::graphics::surface::{
-    OutOfBoundsError, Point, Region, Surface, region_in_bounds,
+use crate::platform::graphics::{
+    console::Console,
+    font::{FONT_MAP, GLYPH_ARRAY},
+    surface::{OutOfBoundsError, Point, Region, Surface, region_in_bounds},
 };
 
 /// Indicates the start of the Limine boot protocol request zone.
@@ -101,6 +103,16 @@ static SMBIOS_REQUEST: ControlledModificationCell<SmbiosRequest> =
         response: ptr::null_mut(),
     });
 
+/// Request for the framebuffers of the program.
+#[used]
+#[unsafe(link_section = ".limine.requests")]
+static FRAMEBUFFER_REQUEST: ControlledModificationCell<FramebufferRequest> =
+    ControlledModificationCell::new(FramebufferRequest {
+        id: FRAMEBUFFER_REQUEST_MAGIC,
+        revision: 0,
+        response: ptr::null_mut(),
+    });
+
 /// Indicates the end of the Limine boot protocol request zone.
 #[used]
 #[unsafe(link_section = ".limine.end")]
@@ -118,11 +130,20 @@ static EXECUTABLE_VIRTUAL_BASE: ControlledModificationCell<u64> =
 /// The executable's physical base address.
 static EXECUTABLE_PHYSICAL_BASE: ControlledModificationCell<u64> =
     ControlledModificationCell::new(0);
+/// The [`FramebufferV0`]s provided by [`FRAMEBUFFER_REQUEST`].
+static FRAMEBUFFERS: ControlledModificationCell<&[&FramebufferV0]> =
+    ControlledModificationCell::new(&[]);
 
 /// Entry point for Rust when booted using the Limine boot protocol.
 pub extern "C" fn limine_main() -> ! {
-    let (memory_map_entries, hhdm_offset, executable_physical_base, executable_virtual_base) =
-        validate_required_tables();
+    *crate::PANIC_FUNC.lock() = panic_handler;
+    let (
+        memory_map_entries,
+        hhdm_offset,
+        executable_physical_base,
+        executable_virtual_base,
+        framebuffers,
+    ) = validate_required_tables();
 
     // SAFETY:
     //
@@ -133,6 +154,7 @@ pub extern "C" fn limine_main() -> ! {
         *HHDM_OFFSET.get_mut() = hhdm_offset;
         *EXECUTABLE_VIRTUAL_BASE.get_mut() = executable_virtual_base;
         *EXECUTABLE_PHYSICAL_BASE.get_mut() = executable_physical_base;
+        *FRAMEBUFFERS.get_mut() = framebuffers;
     }
 
     crate::debug!("Image Start: {:#x}", crate::util::image_start());
@@ -148,7 +170,13 @@ pub extern "C" fn limine_main() -> ! {
 
 /// Validates that the required Limine requests have been fulfilled and returns the contents of
 /// those responses.
-fn validate_required_tables() -> (&'static [&'static MemoryMapEntry], u64, u64, u64) {
+fn validate_required_tables() -> (
+    &'static [&'static MemoryMapEntry],
+    u64,
+    u64,
+    u64,
+    &'static [&'static FramebufferV0],
+) {
     let base_revision_tag = BASE_REVISION_TAG.get();
     if !base_revision_tag.is_supported() {
         // If the base revision this executable was loaded using is greater than or equal to 3,
@@ -207,11 +235,31 @@ fn validate_required_tables() -> (&'static [&'static MemoryMapEntry], u64, u64, 
         panic!("Limine executable address was not provided");
     };
 
+    let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
+    // SAFETY:
+    //
+    // The framebuffer response can be read and should not change if it is not NULL.
+    let framebuffers = if let Some(framebuffer_response) = unsafe { framebuffer_response.as_ref() }
+    {
+        // SAFETY:
+        //
+        // The Limine protocol specification specifies that this operation must be valid.
+        unsafe {
+            slice::from_raw_parts(
+                framebuffer_response.framebuffers.cast::<&FramebufferV0>(),
+                u64_to_usize(framebuffer_response.framebuffer_count),
+            )
+        }
+    } else {
+        &[]
+    };
+
     (
         memory_map_entries,
         hhdm_response.offset,
         executable_address_response.physical_base,
         executable_address_response.virtual_base,
+        framebuffers,
     )
 }
 
@@ -431,4 +479,46 @@ const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
 
     let max_value_foreign = (1u64 << size) - 1;
     (extracted_value as u64 * max_value_foreign) / 255
+}
+
+/// The Limine boot protocol-specific panic handler.
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    let framebuffers = if FRAMEBUFFERS.get().is_empty() {
+        let framebuffer_response = FRAMEBUFFER_REQUEST.get().response;
+
+        // SAFETY:
+        //
+        // The framebuffer response can be read and should not change if it is not NULL.
+        if let Some(framebuffer_response) = unsafe { framebuffer_response.as_ref() } {
+            // SAFETY:
+            //
+            // The Limine protocol specification specifies that this operation must be valid.
+            unsafe {
+                slice::from_raw_parts(
+                    framebuffer_response.framebuffers.cast::<&FramebufferV0>(),
+                    u64_to_usize(framebuffer_response.framebuffer_count),
+                )
+            }
+        } else {
+            &[]
+        }
+    } else {
+        FRAMEBUFFERS.get()
+    };
+
+    for framebuffer in framebuffers {
+        // SAFETY:
+        //
+        // We are panicking: we steal control over the framebuffers and overwrite all data.
+        let Some(framebuffer) = (unsafe { LimineSurface::new(framebuffer) }) else {
+            continue;
+        };
+
+        let mut console = Console::new(framebuffer, GLYPH_ARRAY, FONT_MAP, 0xFF_FF_FF_FF, 0x00);
+        let _ = writeln!(console, "{info}");
+    }
+
+    loop {
+        core::hint::spin_loop()
+    }
 }
