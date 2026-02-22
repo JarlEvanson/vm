@@ -5,8 +5,8 @@ use anyhow::Result;
 
 use crate::{
     action::{
-        build_revm::build_revm, build_stub::build_revm_stub, clippy::clippy, package::package,
-        run::run,
+        build_revm::build_revm, build_stub::build_revm_stub, clippy::clippy, doc::doc,
+        package::package, run::run,
     },
     cli::Action,
 };
@@ -34,6 +34,7 @@ fn main() -> Result<()> {
         }
         Action::Run(config) => run(config)?,
         Action::Clippy(config) => clippy(config)?,
+        Action::Doc(config) => doc(config)?,
     }
 
     Ok(())
