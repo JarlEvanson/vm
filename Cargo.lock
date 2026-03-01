@@ -145,7 +145,10 @@ version = "0.1.0"
 name = "revm"
 version = "0.1.0"
 dependencies = [
+ "conversion",
+ "memory",
  "stub_api",
+ "sync",
 ]
 
 [[package]]

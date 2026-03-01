@@ -4,11 +4,17 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+pub mod arch;
+pub mod log;
+pub mod memory;
 pub mod stub_protocol;
+pub mod util;
 
 /// Generic handler for panics.
 #[panic_handler]
 #[cfg(not(test))]
-fn panic_handler(_: &core::panic::PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    crate::error!("{info}");
+
     loop {}
 }
