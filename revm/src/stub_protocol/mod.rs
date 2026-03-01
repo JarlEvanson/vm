@@ -30,6 +30,15 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     };
 
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
+    early_debug!(
+        "REVM Image Physical Address: {:#x}",
+        generic_table.image_physical_address
+    );
+    early_debug!(
+        "REVM Image Virtual Address: {:#x}",
+        generic_table.image_virtual_address
+    );
+    early_debug!("Image Start: {:#x}", crate::util::image_start());
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
     Status::SUCCESS
