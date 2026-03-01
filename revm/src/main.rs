@@ -4,6 +4,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+pub mod arch;
 pub mod log;
 pub mod stub_protocol;
 pub mod util;
