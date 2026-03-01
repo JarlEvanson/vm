@@ -15,6 +15,9 @@ use stub_api::x86_32::{X86_32Table as ArchTable, X86_32TableV0 as ArchTableV0};
 #[cfg(target_arch = "x86_64")]
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
+#[macro_use]
+pub mod log;
+
 /// Pointer to the REVM protocol table.
 static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
 
