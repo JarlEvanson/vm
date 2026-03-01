@@ -153,6 +153,7 @@ version = "0.1.0"
 name = "revm"
 version = "0.1.0"
 dependencies = [
+ "conversion",
  "stub_api",
 ]
 
