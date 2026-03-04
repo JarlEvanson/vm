@@ -18,3 +18,13 @@ pub mod relocation {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     pub use super::x86_common::relocation::{read_size, relocate};
 }
+
+/// Architecture-dependent cross address space switching code.
+pub mod switch {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub use super::x86_common::switch::{
+        ArchCodeLayout, CpuStorage, allocate_code, arch_policy, arch_table_64_bit, arch_table_size,
+        base_cpu_storage, enter, finalize_cpu_data, handle_stack_allocation,
+        handle_storage_allocation, write_protocol_table_32, write_protocol_table_64,
+    };
+}

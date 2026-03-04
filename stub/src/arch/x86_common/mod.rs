@@ -2,3 +2,4 @@
 
 pub mod paging;
 pub mod relocation;
+pub mod switch;
