@@ -33,6 +33,7 @@ use crate::{
     },
 };
 
+mod x86_32;
 mod x86_64;
 
 /// Allocates and maps a region of memory, then places cross address space switching code into the
@@ -60,7 +61,7 @@ pub fn allocate_code(
     if long_mode {
         x86_64::allocate_code(scheme, storage_pointer, own, other)
     } else {
-        todo!("implement x86_32")
+        x86_32::allocate_code(scheme, storage_pointer, own, other)
     }
 }
 
@@ -251,6 +252,21 @@ extern "C" fn exec_all(cpu_id: u64, arg: *mut ()) {
             clobber_abi("sysv64")
         )
     }
+    // SAFETY:
+    //
+    // The executable's address space and switching code has been correctly prepared.
+    #[cfg(target_arch = "x86")]
+    unsafe {
+        core::arch::asm!(
+            "cli",
+
+            "call eax",
+
+            "sti",
+            inout("eax") u64_to_usize_strict(call) => _,
+            clobber_abi("cdecl")
+        );
+    }
 }
 
 /// Enters the executable at `entry_point` with the provided `protocol_table` as the first and only
@@ -293,6 +309,29 @@ pub fn enter(entry_point: u64, protocol_table: u64) -> stub_api::Status {
 
             in("r10") call,
             clobber_abi("sysv64")
+        );
+        result
+    };
+    // SAFETY:
+    //
+    // The executable's address space and switching code has been correctly prepared.
+    #[cfg(target_arch = "x86")]
+    let result = unsafe {
+        let mut result = 0u64;
+        core::arch::asm!(
+            "cli",
+
+            "push edi",
+            "call eax",
+            "pop edi",
+
+            "mov [edi], eax",
+            "mov [edi + 4], edx",
+
+            "sti",
+            inout("eax") u64_to_usize_strict(call) => _,
+            inout("edi") &mut result => _,
+            clobber_abi("cdecl")
         );
         result
     };
