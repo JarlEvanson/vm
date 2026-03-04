@@ -4,9 +4,13 @@
 
 use core::{error, fmt};
 
+use memory::translation::TranslationScheme;
 use sync::Spinlock;
 
-use crate::executable::LoadExecutableError;
+use crate::{
+    arch::generic::switch::{SwitchError, switch},
+    executable::LoadExecutableError,
+};
 
 pub mod arch;
 pub mod executable;
@@ -18,6 +22,12 @@ fn stub_main() -> Result<(), StubError> {
     let (scheme, entry_point, image_allocation, slide) = executable::load()?;
     crate::debug!("Executable Entry Point: {entry_point:#x}");
 
+    let image_physical_address = image_allocation
+        .range()
+        .start()
+        .start_address(scheme.chunk_size());
+    switch(scheme, entry_point, image_physical_address, slide)?;
+
     Ok(())
 }
 
@@ -26,6 +36,8 @@ fn stub_main() -> Result<(), StubError> {
 enum StubError {
     /// An error occurred while loading the executable.
     LoadExecutableError(LoadExecutableError),
+    /// An error occurred while switching to the executable.
+    SwitchError(SwitchError),
 }
 
 impl From<LoadExecutableError> for StubError {
@@ -34,10 +46,17 @@ impl From<LoadExecutableError> for StubError {
     }
 }
 
+impl From<SwitchError> for StubError {
+    fn from(error: SwitchError) -> Self {
+        Self::SwitchError(error)
+    }
+}
+
 impl fmt::Display for StubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Self::LoadExecutableError(error) => write!(f, "error loading the executable: {error}"),
+            Self::SwitchError(error) => write!(f, "error switching to executable: {error}"),
         }
     }
 }
