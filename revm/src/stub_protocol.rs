@@ -44,8 +44,10 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     // This function has not been called yet and memory APIs have not been used yet.
     unsafe { initialize_memory_management() }
 
-    if virtualization::supported() {
+    if let Some(virtualization_config) = virtualization::supported() {
         crate::info!("Virtualization Supported");
+
+        virtualization::enable(virtualization_config);
     } else {
         crate::info!("Virtualization Not Supported");
     }

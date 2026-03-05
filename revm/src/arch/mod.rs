@@ -21,5 +21,5 @@ pub mod memory {
 /// Virtualization-related functionality.
 pub mod virtualization {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    pub use super::x86_common::virtualization::supported;
+    pub use super::x86_common::virtualization::{VirtualizationConfig, enable, supported};
 }

@@ -100,7 +100,7 @@ path: boot():/revm.efi
         }
         Arch::X86_32 | Arch::X86_64 => {
             cmd.args(["-machine", "q35"]);
-            cmd.args(["-cpu", "max"]);
+            cmd.args(["-cpu", "max", "-enable-kvm"]);
         }
     }
 
@@ -134,6 +134,8 @@ path: boot():/revm.efi
 
     // Enable integrated GDB stub.
     cmd.arg("-s");
+
+    cmd.arg("-no-shutdown").arg("-no-reboot");
 
     run_cmd(cmd).map_err(|error| error.into())
 }
