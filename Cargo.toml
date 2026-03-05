@@ -5,6 +5,7 @@ members = [
     "lib/core/conversion",
     "lib/core/memory",
 
+    "lib/arch/aarch64",
     "lib/arch/x86_32",
     "lib/arch/x86_64",
     "lib/arch/x86_common",
@@ -37,6 +38,7 @@ repository = "https://github.com/JarlEvanson/revm.git"
 conversion = { path = "lib/core/conversion" }
 memory = { path = "lib/core/memory" }
 
+aarch64 = { path = "lib/arch/aarch64" }
 x86_32 = { path = "lib/arch/x86_32" }
 x86_64 = { path = "lib/arch/x86_64" }
 x86_common = { path = "lib/arch/x86_common" }

@@ -5,11 +5,10 @@
 /// This can be utilized to describe both physical and virtual address spaces.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub struct AddressSpaceDescriptor {
-    /// The number of valid bits in the address space.
-    implemented_bits: u8,
-    /// If `true`, the upper bits must be a sign extension of the last implemented bit
-    /// `(implemented_bits - 1)`.
-    sign_extend_canonical: bool,
+    /// The inclusive valid ranges that make up the address space.
+    ///
+    /// If `start > end`, then the range is empty.
+    ranges: [(u64, u64); 2],
 }
 
 impl AddressSpaceDescriptor {
@@ -21,47 +20,78 @@ impl AddressSpaceDescriptor {
     pub const fn new(implemented_bits: u8, sign_extend_canonical: bool) -> Self {
         assert!(implemented_bits <= 64);
 
-        Self {
-            implemented_bits,
-            sign_extend_canonical,
+        if implemented_bits == 64 {
+            return Self {
+                ranges: [(0, u64::MAX), (1, 0)],
+            };
+        } else if implemented_bits == 0 {
+            return Self {
+                ranges: [(1, 0), (1, 0)],
+            };
+        }
+
+        if sign_extend_canonical {
+            let sign_bit = 1u64 << (implemented_bits - 1);
+
+            let lower = (0, sign_bit - 1);
+            let upper = ((!0u64) << (implemented_bits - 1), u64::MAX);
+
+            Self {
+                ranges: [lower, upper],
+            }
+        } else {
+            let lower = (0, (1u64 << implemented_bits) - 1);
+            let upper = (1, 0);
+
+            Self {
+                ranges: [lower, upper],
+            }
         }
     }
 
-    /// Returns the number of implemented bits in the address space described by
-    /// [`AddressSpaceDescriptor`].
-    pub const fn implemented_bits(self) -> u8 {
-        self.implemented_bits
-    }
+    /// Constructs a new [`AddressSpaceDescriptor`] from two ranges of a given bit size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the provided `lower_bits` or `upper_bits` is greater than 64 bits, as that is
+    /// nonsensical.
+    pub const fn bit_range(lower_bits: u8, upper_bits: u8) -> Self {
+        assert!(lower_bits <= 64);
+        assert!(upper_bits <= 64);
 
-    /// Returns `true` if the address space described by [`AddressSpaceDescriptor`] requires
-    /// canonical address to be sign extended.
-    pub const fn sign_extended_canonical(self) -> bool {
-        self.sign_extend_canonical
+        let mut lower = if lower_bits == 0 {
+            (1, 0)
+        } else if lower_bits == 64 {
+            (0, u64::MAX)
+        } else {
+            (0, (1u64 << lower_bits) - 1)
+        };
+
+        let mut upper = if upper_bits == 0 {
+            (1, 0)
+        } else if upper_bits == 64 {
+            (0, u64::MAX)
+        } else {
+            ((!0u64) << upper_bits, u64::MAX)
+        };
+
+        if lower.0 > lower.1 {
+            lower = upper;
+            upper = (1, 0);
+        }
+
+        Self {
+            ranges: [lower, upper],
+        }
     }
 
     /// Returns `true` if the provided address is a valid address in the address space described by
     /// [`AddressSpaceDescriptor`].
     pub const fn is_valid(self, address: u64) -> bool {
-        if self.implemented_bits == 64 {
-            return true;
-        } else if self.implemented_bits == 0 {
-            return false;
-        }
+        let (s0, e0) = self.ranges[0];
+        let (s1, e1) = self.ranges[1];
 
-        let mask = (1u64 << self.implemented_bits) - 1;
-        if self.sign_extend_canonical {
-            let sign_bit = 1u64 << (self.implemented_bits - 1);
-            let canonical_mask = !mask;
-
-            let upper_bits = address & canonical_mask;
-            if address & sign_bit == 0 {
-                upper_bits == 0
-            } else {
-                upper_bits == canonical_mask
-            }
-        } else {
-            address <= mask
-        }
+        (address >= s0 && address <= e0) || (address >= s1 && address <= e1)
     }
 
     /// Returns `true` if the provided inclusive range `[start, end]` is entirely valid within the
@@ -72,31 +102,10 @@ impl AddressSpaceDescriptor {
             return false;
         }
 
-        // An actual 64-bit address space means that every address is valid.
-        if self.implemented_bits == 64 {
-            return true;
-        } else if self.implemented_bits == 0 {
-            return false;
-        }
+        let (s0, e0) = self.ranges[0];
+        let (s1, e1) = self.ranges[1];
 
-        // Both endpoints must be valid.
-        if !self.is_valid(start) || !self.is_valid(end) {
-            return false;
-        }
-
-        // The start and end addresses are valid, so for a non-canonical address space, the entire
-        // range must be valid since there is a single validity range.
-        if !self.sign_extend_canonical {
-            return true;
-        }
-
-        // Canonical case: must remain within one canonical half
-        let sign_bit = 1u64 << (self.implemented_bits - 1);
-
-        let start_high = (start & sign_bit) != 0;
-        let end_high = (end & sign_bit) != 0;
-
-        start_high == end_high
+        (start >= s0 && end <= e0) || (start >= s1 && end <= e1)
     }
 
     /// Returns the valid ranges for the address space described by [`AddressSpaceDescriptor`].
@@ -104,30 +113,7 @@ impl AddressSpaceDescriptor {
     /// If the valid ranges for the [`AddressSpaceDescriptor`] can be described by a single range,
     /// then the second range will be empty.
     pub const fn valid_ranges(self) -> [(u64, u64); 2] {
-        if self.implemented_bits == 64 {
-            return [(0, u64::MAX), (1, 0)];
-        } else if self.implemented_bits == 0 {
-            return [(1, 0); 2];
-        }
-
-        // Non-canonical: simple zero-extended space
-        if !self.sign_extend_canonical {
-            let max = (1u64 << self.implemented_bits) - 1;
-            return [(0, max), (1, 0)];
-        }
-
-        // Canonical sign-extended case
-        let sign_bit = 1u64 << (self.implemented_bits - 1);
-
-        // Lower canonical range: sign bit = 0
-        let lower_start = 0;
-        let lower_end = sign_bit - 1;
-
-        // Upper canonical range: sign bit = 1 and upper bits all ones
-        let upper_start = (!0u64) << (self.implemented_bits - 1);
-        let upper_end = u64::MAX;
-
-        [(lower_start, lower_end), (upper_start, upper_end)]
+        self.ranges
     }
 }
 
