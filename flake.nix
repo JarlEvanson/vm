@@ -28,6 +28,8 @@
 
         OVMF_DIR = "${packages.${system}.ovmf-latest}";
         LIMINE_DIR = "${packages.${system}.limine-latest}/share/limine";
+
+        LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
       };
     };
     

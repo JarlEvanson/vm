@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-use crate::{action::run_cmd, cli::build_revm::BuildRevmConfig};
+use crate::{action::run_cmd, cli::build_revm::BuildRevmConfig, common::Arch};
 
 /// Builds `revm` as specified by `config`, returning the path to the final binary on
 /// success.
@@ -22,6 +22,13 @@ pub fn build_revm(config: BuildRevmConfig) -> Result<PathBuf> {
     cmd.args(["-Z", "build-std-features=compiler-builtins-mem"]);
     cmd.args(["-Z", "json-target-spec"]);
     cmd.args(["--profile", config.profile.as_str()]);
+
+    if config.arch == Arch::X86_32 {
+        cmd.env(
+            "BINDGEN_EXTRA_CLANG_ARGS_x86_32-unknown-none",
+            "-target i686-unknown-none",
+        );
+    }
 
     run_cmd(cmd)?;
 

@@ -45,6 +45,6 @@ pub unsafe fn deallocate(ptr: NonNull<u8>, size: usize, alignment: usize) {
         // [`slab::deallocate()`].
         unsafe { slab::deallocate(ptr, size.max(alignment)) }
     } else {
-        crate::debug!("implement page-sized deallocation")
+        crate::trace!("implement page-sized deallocation")
     }
 }
