@@ -17,3 +17,9 @@ pub mod memory {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     pub use super::x86_common::compute_page_size;
 }
+
+/// Virtualization-related functionality.
+pub mod virtualization {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub use super::x86_common::virtualization::supported;
+}

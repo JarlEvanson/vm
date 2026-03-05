@@ -8,7 +8,7 @@ use core::{
 use conversion::{u64_to_usize_strict, usize_to_u64};
 use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
 
-use crate::memory::initialize_memory_management;
+use crate::{arch::virtualization, memory::initialize_memory_management};
 
 #[cfg(target_arch = "aarch64")]
 pub use stub_api::aarch64::{Aarch64Table as ArchTable, Aarch64TableV0 as ArchTableV0};
@@ -43,6 +43,12 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     //
     // This function has not been called yet and memory APIs have not been used yet.
     unsafe { initialize_memory_management() }
+
+    if virtualization::supported() {
+        crate::info!("Virtualization Supported");
+    } else {
+        crate::info!("Virtualization Not Supported");
+    }
 
     Status::SUCCESS
 }
