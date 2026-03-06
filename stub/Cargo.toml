@@ -22,6 +22,9 @@ font.workspace = true
 stub_api.workspace = true
 sync.workspace = true
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+aarch64.workspace = true
+
 [target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
 x86_32.workspace = true
 x86_64.workspace = true

@@ -270,6 +270,16 @@ pub extern "C" fn limine_main() -> ! {
 
     let mut address_impl = ADDRESS_IMPL.lock();
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY:
+        //
+        // This takeover of [`ArchAddressSpace`] is only performed once and this program has exclusive
+        // control over the system.
+        let scheme =
+            unsafe { ArchScheme::active_current().expect("failed to initialize address space") };
+        *address_impl = Some(scheme);
+    }
     #[cfg(target_arch = "x86_64")]
     {
         // SAFETY:
@@ -439,7 +449,7 @@ impl Platform for Limine {
             unreachable!("ADDRESS_IMPL was not initialized");
         };
 
-        let page_count = range.count().div_ceil(usize_to_u64(self.page_size()));
+        let page_count = range.count().div_ceil(address_impl.chunk_size());
         let range = AddressChunkRange::new(
             AddressChunk::containing_address(range.start().to_address(), address_impl.chunk_size()),
             page_count,
@@ -458,13 +468,20 @@ impl Platform for Limine {
                 .expect("failed to perform mapping");
         }
 
+        #[cfg(target_arch = "aarch64")]
+        // SAFETY:
+        //
+        // These instructions are safe to execute at EL1 or EL2.
+        unsafe {
+            core::arch::asm!("dsb ishst", "tlbi vmalle1", "dsb ish", "isb",)
+        }
         #[cfg(target_arch = "x86_64")]
         for chunk in range.iter() {
             let virtual_address = chunk.start_address(address_impl.chunk_size());
             x86_common::paging::tlb::invalidate_page(u64_to_usize(virtual_address.value()));
         }
-        #[cfg(not(target_arch = "x86_64"))]
-        compile_error!("implement TLB invalidation");
+        #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+        todo!("implement TLB invalidation");
 
         ptr::with_exposed_provenance_mut(u64_to_usize(
             range
