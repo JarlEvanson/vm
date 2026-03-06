@@ -156,6 +156,9 @@ dependencies = [
  "conversion",
  "stub_api",
  "sync",
+ "x86_32",
+ "x86_64",
+ "x86_common",
 ]
 
 [[package]]
