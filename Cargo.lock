@@ -155,6 +155,7 @@ version = "0.1.0"
 dependencies = [
  "conversion",
  "stub_api",
+ "sync",
 ]
 
 [[package]]

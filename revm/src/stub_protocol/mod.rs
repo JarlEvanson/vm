@@ -2,7 +2,7 @@
 
 use core::{
     mem, ptr,
-    sync::atomic::{AtomicPtr, Ordering},
+    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
 };
 
 use conversion::{u64_to_usize_strict, usize_to_u64};
@@ -14,6 +14,8 @@ use stub_api::aarch64::{Aarch64Table as ArchTable, Aarch64TableV0 as ArchTableV0
 use stub_api::x86_32::{X86_32Table as ArchTable, X86_32TableV0 as ArchTableV0};
 #[cfg(target_arch = "x86_64")]
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
+
+use crate::arch::arch_config::{arch_config, initialize_arch_config, validate_same};
 
 #[macro_use]
 pub mod log;
@@ -40,8 +42,55 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     );
     early_debug!("Image Start: {:#x}", crate::util::image_start());
 
+    if !initalize_and_validate_arch_config(generic_table) {
+        return Status::NOT_SUPPORTED;
+    }
+    early_debug!("{:#x?}", arch_config());
+
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
     Status::SUCCESS
+}
+
+/// Initializes the architectural configuration and validates that all cores are compatible with
+/// said architectural configuration.
+fn initalize_and_validate_arch_config(generic_table: &GenericTable) -> bool {
+    extern "C" fn validate_same_arch_config(_: u64, arg: *mut ()) {
+        let arg = arg.cast::<AtomicBool>();
+        // SAFETY:
+        //
+        // This function is only called by `initalize_and_validate_arch_config` and it provides a valid
+        // [`AtomicBool`] pointer.
+        let arg = unsafe { &*arg };
+
+        arg.fetch_and(validate_same(), Ordering::Relaxed);
+    }
+
+    // SAFETY:
+    //
+    // `arch::initialize_arch_config()` was called before any architecture-dependent actions
+    // occurred.
+    if let Err(error) = unsafe { initialize_arch_config() } {
+        early_error!("{error:?}");
+        return false;
+    }
+
+    let all_same_config = AtomicBool::new(true);
+    // SAFETY:
+    //
+    // A valid function was passed and the argument is a valid pointer in regards to the passed
+    // function.
+    unsafe {
+        (generic_table.run_on_all_processors)(
+            validate_same_arch_config,
+            ptr::from_ref(&all_same_config).cast_mut().cast::<()>(),
+        )
+    };
+    if !all_same_config.load(Ordering::Relaxed) {
+        early_error!("Mismatched ArchConfig");
+        return false;
+    }
+
+    true
 }
 
 /// Returns the REVM protocol table.

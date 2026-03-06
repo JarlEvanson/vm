@@ -1,5 +1,7 @@
 //! Architecture-specific functionality.
 
+// ARCHITECTURE-SPECIFC FUNCTIONALITY IMPLEMENTATIONS.
+
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
 #[cfg(target_arch = "x86")]
@@ -15,3 +17,7 @@ use aarch64 as arch_impl;
 use x86_32 as arch_impl;
 #[cfg(target_arch = "x86_64")]
 use x86_64 as arch_impl;
+
+// ARCHITECTURE-SPECIFC FUNCTIONALITY WRAPPERS.
+
+pub mod arch_config;
