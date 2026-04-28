@@ -8,6 +8,7 @@ members = [
     # --- File Formats ---
     # Parsers and writers for binary file formats.
     "lib/format/elf",
+    "lib/format/pe",
     
     # --- Application Binaries ---
     # The crates that define the application binaries that the remainder of
@@ -33,6 +34,7 @@ conversion = { path = "lib/core/conversion" }
 
 # File Formats
 elf = { path = "lib/format/elf" }
+pe = { path = "lib/format/pe" }
 
 # --- External Dependencies ---
 anyhow = "1.0"
