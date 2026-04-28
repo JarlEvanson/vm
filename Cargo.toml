@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
+    # --- Core Abstractions ---
+    # Low-level primitives that are used across many crates in this project.
+    "lib/core/conversion",
+
     # --- Application Binaries ---
     # The crates that define the application binaries that the remainder of
     # the workspace is used to support.
@@ -19,6 +23,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
+# --- Internal Dependencies ---
+# Core Abstractions
+conversion = { path = "lib/core/conversion" }
+
 # --- External Dependencies ---
 anyhow = "1.0"
 clap = "4.5"
