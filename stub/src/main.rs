@@ -2,6 +2,8 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+pub mod initgraph;
+
 /// Generic handler for panics.
 #[panic_handler]
 #[cfg(not(test))]

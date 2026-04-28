@@ -45,6 +45,10 @@ SECTIONS {
     . = ALIGN(CONSTANT(COMMONPAGESIZE));
     .data : {
         *(.data .data.*)
+
+        init_node_start = .;
+        *(.init_node .init_node.*)
+        init_node_end = .;
     } :data
 
     .bss : {
