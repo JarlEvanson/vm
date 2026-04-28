@@ -1,0 +1,16 @@
+diff --git a/common/protos/linux_x86.c b/common/protos/linux_x86.c
+index c6f544b..743824d 100644
+--- a/common/protos/linux_x86.c
++++ b/common/protos/linux_x86.c
+@@ -366,6 +366,11 @@ noreturn void linux_load(char *config, char *cmdline) {
+     }
+ 
+     setup_header->loadflags &= ~(1 << 5);     // print early messages
++#if defined (UEFI) && defined (__x86_64__)
++    if ((setup_header->xloadflags & 3) == 3) {
++        use_64_bit_proto = true;
++    }
++#endif
+ 
+     // load kernel
+     uintptr_t kernel_load_addr = 0x100000;
