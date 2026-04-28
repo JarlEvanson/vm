@@ -3,6 +3,7 @@
 #![cfg_attr(not(test), no_main)]
 
 pub mod initgraph;
+pub mod platform;
 
 /// Generic handler for panics.
 #[panic_handler]
