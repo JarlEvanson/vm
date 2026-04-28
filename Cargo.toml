@@ -9,6 +9,10 @@ members = [
     # Parsers and writers for binary file formats.
     "lib/format/elf",
     "lib/format/pe",
+
+    # --- Utilities ---
+    # General-purpose internal helper libraries.
+    "lib/sync",
     
     # --- Application Binaries ---
     # The crates that define the application binaries that the remainder of
@@ -35,6 +39,9 @@ conversion = { path = "lib/core/conversion" }
 # File Formats
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
+# Utilities
+sync = { path = "lib/sync" }
 
 # --- External Dependencies ---
 anyhow = "1.0"

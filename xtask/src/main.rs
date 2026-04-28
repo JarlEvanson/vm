@@ -22,6 +22,8 @@ const DEPENDENCIES: &[&str] = &[
     // File Formats.
     "elf",
     "pe",
+    // Utilities.
+    "sync",
     // Tools.
     "xtask",
 ];
