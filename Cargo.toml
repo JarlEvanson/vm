@@ -6,6 +6,10 @@ members = [
     # the workspace is used to support.
     "revm",
     "stub",
+
+    # --- Tools ---
+    # Helper utilities for development and packaging workflows.
+    "xtask",
 ]
 
 [workspace.package]
