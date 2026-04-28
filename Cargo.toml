@@ -5,6 +5,10 @@ members = [
     # Low-level primitives that are used across many crates in this project.
     "lib/core/conversion",
 
+    # --- File Formats ---
+    # Parsers and writers for binary file formats.
+    "lib/format/elf",
+    
     # --- Application Binaries ---
     # The crates that define the application binaries that the remainder of
     # the workspace is used to support.
@@ -26,6 +30,9 @@ repository = "https://github.com/JarlEvanson/revm.git"
 # --- Internal Dependencies ---
 # Core Abstractions
 conversion = { path = "lib/core/conversion" }
+
+# File Formats
+elf = { path = "lib/format/elf" }
 
 # --- External Dependencies ---
 anyhow = "1.0"
