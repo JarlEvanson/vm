@@ -4,7 +4,7 @@
 use anyhow::Result;
 
 use crate::{
-    action::{build_revm::build_revm, build_stub::build_revm_stub, package::package},
+    action::{build_revm::build_revm, build_stub::build_revm_stub, package::package, run::run},
     cli::Action,
 };
 
@@ -26,6 +26,7 @@ fn main() -> Result<()> {
             let path = package(config)?;
             println!("packaged revm located at \"{}\"", path.display());
         }
+        Action::Run(config) => run(config)?,
     }
 
     Ok(())
