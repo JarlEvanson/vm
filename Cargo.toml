@@ -19,6 +19,9 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JarlEvanson/revm.git"
 
 [workspace.dependencies]
+# --- External Dependencies ---
+anyhow = "1.0"
+clap = "4.5"
 
 [workspace.lints.rust]
 # Safety lints
