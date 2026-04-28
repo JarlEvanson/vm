@@ -2,5 +2,7 @@
 //! the executable.
 
 mod memory;
+mod platform_tables;
 
 pub use memory::*;
+pub use platform_tables::*;
