@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
 members = [
+    # --- Application Binaries ---
+    # The crates that define the application binaries that the remainder of
+    # the workspace is used to support.
+    "revm",
 ]
 
 [workspace.package]
