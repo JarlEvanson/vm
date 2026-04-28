@@ -19,6 +19,7 @@ pub mod common;
 const DEPENDENCIES: &[&str] = &[
     // Core Abstractions.
     "conversion",
+    "memory",
     // File Formats.
     "elf",
     "pe",
