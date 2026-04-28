@@ -5,6 +5,7 @@
 use std::{error, fmt, io};
 
 pub mod build_stub;
+pub mod clippy;
 pub mod package;
 pub mod run;
 
