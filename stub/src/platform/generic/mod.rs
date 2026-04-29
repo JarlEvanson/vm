@@ -3,6 +3,8 @@
 
 mod memory;
 mod platform_tables;
+mod processor;
 
 pub use memory::*;
 pub use platform_tables::*;
+pub use processor::*;
