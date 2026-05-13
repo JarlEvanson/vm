@@ -6,11 +6,13 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use sync::ControlledModificationCell;
 
 mod mem_structs;
+mod phys;
 
 pub use mem_structs::{
     Frame, FrameRange, Page, PageRange, PhysicalAddress, PhysicalAddressRange, VirtualAddress,
     VirtualAddressRange,
 };
+pub use phys::*;
 
 /// The current [`MemoryConfig`].
 static MEMORY_CONFIG: ControlledModificationCell<Option<MemoryConfig>> =
