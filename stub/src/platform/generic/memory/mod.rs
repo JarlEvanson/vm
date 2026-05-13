@@ -5,10 +5,12 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use sync::ControlledModificationCell;
 
+mod alloc;
 mod mem_structs;
 mod phys;
 mod virt;
 
+pub use alloc::*;
 pub use mem_structs::{
     Frame, FrameRange, Page, PageRange, PhysicalAddress, PhysicalAddressRange, VirtualAddress,
     VirtualAddressRange,
