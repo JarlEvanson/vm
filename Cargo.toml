@@ -6,6 +6,10 @@ members = [
     "lib/core/conversion",
     "lib/core/memory",
 
+    # --- Architecture Support ---
+    # Architecture dependent definitions and logic.
+    "lib/arch/aarch64",
+
     # --- File Formats ---
     # Parsers and writers for binary file formats.
     "lib/format/elf",
@@ -38,6 +42,9 @@ repository = "https://github.com/JarlEvanson/revm.git"
 # Core Abstractions
 conversion = { path = "lib/core/conversion" }
 memory = { path = "lib/core/memory" }
+
+# Architecture Support
+aarch64 = { path = "lib/arch/aarch64" }
 
 # File Formats
 elf = { path = "lib/format/elf" }

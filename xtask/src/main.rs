@@ -20,6 +20,8 @@ const DEPENDENCIES: &[&str] = &[
     // Core Abstractions.
     "conversion",
     "memory",
+    // Architecture Support.
+    "aarch64",
     // File Formats.
     "elf",
     "pe",
