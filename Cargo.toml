@@ -9,6 +9,7 @@ members = [
     # --- Architecture Support ---
     # Architecture dependent definitions and logic.
     "lib/arch/aarch64",
+    "lib/arch/x86",
 
     # --- File Formats ---
     # Parsers and writers for binary file formats.
@@ -45,6 +46,7 @@ memory = { path = "lib/core/memory" }
 
 # Architecture Support
 aarch64 = { path = "lib/arch/aarch64" }
+x86 = { path = "lib/arch/x86" }
 
 # File Formats
 elf = { path = "lib/format/elf" }

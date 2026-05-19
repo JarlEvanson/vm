@@ -22,6 +22,7 @@ const DEPENDENCIES: &[&str] = &[
     "memory",
     // Architecture Support.
     "aarch64",
+    "x86",
     // File Formats.
     "elf",
     "pe",
