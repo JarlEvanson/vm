@@ -30,6 +30,7 @@ members = [
 
     # --- Tools ---
     # Helper utilities for development and packaging workflows.
+    "tools/font-converter",
     "xtask",
 ]
 
@@ -57,6 +58,9 @@ pe = { path = "lib/format/pe" }
 font = { path = "lib/font" }
 stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
+
+# Tools.
+font-converter = { path = "tools/font-converter" }
 
 # --- External Dependencies ---
 anyhow = "1.0"

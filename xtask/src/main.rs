@@ -31,6 +31,7 @@ const DEPENDENCIES: &[&str] = &[
     "stub_api",
     "sync",
     // Tools.
+    "font-converter",
     "xtask",
 ];
 
