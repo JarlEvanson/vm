@@ -26,6 +26,8 @@ const DEPENDENCIES: &[&str] = &[
     // File Formats.
     "elf",
     "pe",
+    // Platform Support.
+    "uefi",
     // Utilities.
     "font",
     "stub_api",
