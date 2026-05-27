@@ -143,6 +143,7 @@ dependencies = [
  "memory",
  "stub_api",
  "sync",
+ "x86",
 ]
 
 [[package]]
