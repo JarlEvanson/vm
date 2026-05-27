@@ -152,6 +152,8 @@ dependencies = [
  "aarch64",
  "conversion",
  "elf",
+ "font",
+ "font-converter",
  "memory",
  "stub_api",
  "sync",

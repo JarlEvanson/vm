@@ -4,5 +4,6 @@
 // Other support modules.
 
 mod generic;
+mod graphics;
 
 pub use generic::*;
