@@ -16,6 +16,10 @@ members = [
     "lib/format/elf",
     "lib/format/pe",
 
+    # --- Platform Support ---
+    # Platform definitions and logic.
+    "lib/platform/uefi",
+
     # --- Utilities ---
     # General-purpose internal helper libraries.
     "lib/font",
@@ -53,6 +57,9 @@ x86 = { path = "lib/arch/x86" }
 # File Formats
 elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
+
+# Platform Support
+uefi = { path = "lib/platform/uefi" }
 
 # Utilities
 font = { path = "lib/font" }
