@@ -6,5 +6,6 @@
 mod frame_allocator;
 mod generic;
 mod graphics;
+mod heap_allocator;
 
 pub use generic::*;
