@@ -10,6 +10,8 @@ repository.workspace = true
 conversion.workspace = true
 memory.workspace = true
 
+elf.workspace = true
+
 stub_api.workspace = true
 sync.workspace = true
 

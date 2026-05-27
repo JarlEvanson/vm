@@ -134,6 +134,7 @@ name = "revm-stub"
 version = "0.1.0"
 dependencies = [
  "conversion",
+ "elf",
  "memory",
  "stub_api",
  "sync",
