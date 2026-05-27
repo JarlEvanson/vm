@@ -13,6 +13,7 @@ members = [
 
     # --- Utilities ---
     # General-purpose internal helper libraries.
+    "lib/stub_api",
     "lib/sync",
     
     # --- Application Binaries ---
@@ -43,6 +44,7 @@ elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 
 # Utilities
+stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
 
 # --- External Dependencies ---
