@@ -4,8 +4,10 @@
 
 use sync::Spinlock;
 
+pub mod arch;
 pub mod initgraph;
 pub mod platform;
+pub mod util;
 
 /// The platform-specific panic handler function.
 static PANIC_HANDLER: Spinlock<fn(&core::panic::PanicInfo) -> !> = Spinlock::new(fallback);
