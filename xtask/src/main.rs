@@ -27,6 +27,7 @@ const DEPENDENCIES: &[&str] = &[
     "elf",
     "pe",
     // Utilities.
+    "font",
     "stub_api",
     "sync",
     // Tools.

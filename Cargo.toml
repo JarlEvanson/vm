@@ -18,6 +18,7 @@ members = [
 
     # --- Utilities ---
     # General-purpose internal helper libraries.
+    "lib/font",
     "lib/stub_api",
     "lib/sync",
     
@@ -53,6 +54,7 @@ elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 
 # Utilities
+font = { path = "lib/font" }
 stub_api = { path = "lib/stub_api" }
 sync = { path = "lib/sync" }
 
