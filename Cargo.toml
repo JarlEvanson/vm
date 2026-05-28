@@ -18,6 +18,7 @@ members = [
 
     # --- Platform Support ---
     # Platform definitions and logic.
+    "lib/platform/limine",
     "lib/platform/uefi",
 
     # --- Utilities ---
@@ -59,6 +60,7 @@ elf = { path = "lib/format/elf" }
 pe = { path = "lib/format/pe" }
 
 # Platform Support
+limine = { path = "lib/platform/limine" }
 uefi = { path = "lib/platform/uefi" }
 
 # Utilities

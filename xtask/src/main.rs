@@ -27,6 +27,7 @@ const DEPENDENCIES: &[&str] = &[
     "elf",
     "pe",
     // Platform Support.
+    "limine",
     "uefi",
     // Utilities.
     "font",
