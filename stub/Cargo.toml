@@ -24,11 +24,15 @@ sync.workspace = true
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 aarch64.workspace = true
 
+limine.workspace = true
+
 [target.'cfg(target_arch = "x86")'.dependencies]
 x86.workspace = true
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86.workspace = true
+
+limine.workspace = true
 
 [lints]
 workspace = true
