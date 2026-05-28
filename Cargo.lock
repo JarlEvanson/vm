@@ -166,11 +166,14 @@ version = "0.1.0"
 dependencies = [
  "aarch64",
  "conversion",
+ "device_tree",
  "elf",
  "font",
  "font-converter",
  "limine",
+ "linux",
  "memory",
+ "pe",
  "stub_api",
  "sync",
  "uefi",
@@ -228,5 +231,6 @@ dependencies = [
  "clap",
  "conversion",
  "elf",
+ "linux",
  "pe",
 ]

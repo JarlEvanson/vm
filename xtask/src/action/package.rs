@@ -4,7 +4,7 @@
 use std::{ffi::CStr, fs, mem, path::PathBuf};
 
 use anyhow::{Context, Result};
-use conversion::usize_to_u16_strict;
+use conversion::{usize_to_u16_strict, usize_to_u64};
 use elf::{
     class::class_any::AnyClass,
     encoding::AnyEndian,
@@ -269,6 +269,36 @@ fn create_package(stub: &[u8], revm: &[u8]) -> Result<Vec<u8>> {
     nt_headers_64.write(data.pe_header_offset, &mut package);
     package.write_bytes(0, b"MZ");
     package.write_u32(60, u32::try_from(data.pe_header_offset).unwrap());
+
+    if elf_data.linux_efi_header.is_some() {
+        // 64 KiB Stack + PE image size.
+        // 64 KiB Stack can completely overlap with package.
+        let required_free_region_size =
+            usize_to_u64(package.len().max(64 * 1024)) + u64::from(data.image_size);
+
+        match elf_data.arch {
+            Arch::Aarch64 => {
+                let image_size_offset = mem::offset_of!(linux::aarch64::Header, image_size);
+
+                package.write_u64(usize_to_u64(image_size_offset), required_free_region_size);
+            }
+            Arch::I686 | Arch::X86_64 => {
+                let image_size_offset =
+                    linux::x86::Header::BASE_OFFSET + mem::offset_of!(linux::x86::Header, syssize);
+
+                let paragraphs = u32::try_from(required_free_region_size.div_ceil(16))
+                    .expect("image is too large");
+                package.write_u32(usize_to_u64(image_size_offset), paragraphs);
+
+                let image_size_offset = linux::x86::Header::BASE_OFFSET
+                    + mem::offset_of!(linux::x86::Header, init_size);
+                package.write_u32(
+                    usize_to_u64(image_size_offset),
+                    u32::try_from(required_free_region_size).expect("image is too large"),
+                );
+            }
+        }
+    }
 
     Ok(package)
 }

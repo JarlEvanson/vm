@@ -12,6 +12,8 @@ conversion.workspace = true
 elf.workspace = true
 pe.workspace = true
 
+linux.workspace = true
+
 anyhow.workspace = true
 clap.workspace = true
 
