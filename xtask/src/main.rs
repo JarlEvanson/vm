@@ -28,6 +28,7 @@ const DEPENDENCIES: &[&str] = &[
     "pe",
     // Platform Support.
     "limine",
+    "linux",
     "uefi",
     // Utilities.
     "font",
