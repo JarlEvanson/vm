@@ -14,7 +14,9 @@ conversion.workspace = true
 memory.workspace = true
 
 elf.workspace = true
+pe.workspace = true
 
+linux.workspace = true
 uefi.workspace = true
 
 font.workspace = true
@@ -25,6 +27,8 @@ sync.workspace = true
 aarch64.workspace = true
 
 limine.workspace = true
+
+device_tree.workspace = true
 
 [target.'cfg(target_arch = "x86")'.dependencies]
 x86.workspace = true

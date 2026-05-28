@@ -45,3 +45,9 @@ pub mod switch {
         handle_storage_allocation, write_protocol_table_32, write_protocol_table_64,
     };
 }
+
+/// Architecture-specific functionality.
+pub mod arch_specific {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    pub use super::x86::load_gdt;
+}
