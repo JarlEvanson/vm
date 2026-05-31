@@ -22,6 +22,10 @@ members = [
     "lib/platform/linux",
     "lib/platform/uefi",
 
+    # --- Hardware & Firmware Discovery ---
+    # Standards for hardware discovery and configuration.
+    "lib/firmware/device_tree",
+
     # --- Utilities ---
     # General-purpose internal helper libraries.
     "lib/font",
@@ -64,6 +68,9 @@ pe = { path = "lib/format/pe" }
 limine = { path = "lib/platform/limine" }
 linux = { path = "lib/platform/linux" }
 uefi = { path = "lib/platform/uefi" }
+
+# Hardware & Firmware Discovery
+device_tree = { path = "lib/firmware/device_tree" }
 
 # Utilities
 font = { path = "lib/font" }

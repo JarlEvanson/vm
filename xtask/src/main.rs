@@ -30,6 +30,8 @@ const DEPENDENCIES: &[&str] = &[
     "limine",
     "linux",
     "uefi",
+    // Hardware & Firmware Discovery
+    "device_tree",
     // Utilities.
     "font",
     "stub_api",
