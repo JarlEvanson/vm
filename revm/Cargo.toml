@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+conversion.workspace = true
+
 stub_api.workspace = true
 
 [lints]
