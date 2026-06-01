@@ -24,12 +24,22 @@ static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
 /// Entry point to `revm` utilizing the REVM protocol.
 #[unsafe(no_mangle)]
 extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
-    let (generic_table, _arch_table) = match validate_protocol_table(header_ptr) {
+    let (generic_table, arch_table) = match validate_protocol_table(header_ptr) {
         Ok((generic, arch)) => (generic, arch),
         Err(status) => return status,
     };
 
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
+    early_debug!(
+        "REVM Image Physical Address: {:#x}",
+        generic_table.image_physical_address
+    );
+    early_debug!(
+        "REVM Image Virtual Address: {:#x}",
+        generic_table.image_virtual_address
+    );
+    early_debug!("Image Start: {:#x}", crate::util::image_start());
+    early_debug!("{arch_table:#x?}");
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
 
