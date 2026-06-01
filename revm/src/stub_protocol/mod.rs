@@ -16,7 +16,7 @@ use stub_api::i686::{I686Table as ArchTable, I686TableV0 as ArchTableV0};
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
 use crate::arch::capabilities::{
-    initialize_arch_capability_support, validate_arch_capabilities_match,
+    arch_capability_support, initialize_arch_capability_support, validate_arch_capabilities_match,
 };
 
 #[macro_use]
@@ -33,6 +33,7 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
         Err(status) => return status,
     };
 
+    // Initialize protocol table and print basic information.
     PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
     early_debug!(
         "REVM Image Physical Address: {:#x}",
@@ -44,6 +45,12 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     );
     early_debug!("Image Start: {:#x}", crate::util::image_start());
     early_debug!("{arch_table:#x?}");
+
+    // Test that required architectural capabilities are present.
+    if !initalize_and_validate_arch_capability_support(generic_table) {
+        return Status::NOT_SUPPORTED;
+    }
+    early_debug!("{:#x?}", arch_capability_support());
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
 
