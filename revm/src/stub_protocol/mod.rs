@@ -1,6 +1,9 @@
 //! Code interacting with the REVM protocol.
 
-use core::mem;
+use core::{
+    mem, ptr,
+    sync::atomic::{AtomicPtr, Ordering},
+};
 
 use conversion::{u64_to_usize_strict, usize_to_u64};
 use stub_api::{GenericTable, GenericTableV0, Header, HeaderV0, Status};
@@ -12,6 +15,9 @@ use stub_api::i686::{I686Table as ArchTable, I686TableV0 as ArchTableV0};
 #[cfg(target_arch = "x86_64")]
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
+/// Pointer to the REVM protocol table.
+static PROTOCOL_TABLE: AtomicPtr<HeaderV0> = AtomicPtr::new(ptr::null_mut());
+
 /// Entry point to `revm` utilizing the REVM protocol.
 #[unsafe(no_mangle)]
 extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
@@ -20,7 +26,52 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
         Err(status) => return status,
     };
 
+    PROTOCOL_TABLE.store(header_ptr, Ordering::Release);
+
+    PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
+
     Status::SUCCESS
+}
+
+/// Returns the REVM protocol table.
+pub fn protocol_table() -> Option<&'static Header> {
+    // SAFETY:
+    //
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
+    unsafe { PROTOCOL_TABLE.load(Ordering::Acquire).as_ref() }
+}
+
+/// Returns the REVM protocol generic table.
+pub fn generic_table() -> Option<&'static GenericTable> {
+    let header = protocol_table()?;
+
+    // SAFETY:
+    //
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
+    unsafe {
+        (&raw const *header)
+            .wrapping_byte_add(u64_to_usize_strict(header.generic_table_offset))
+            .cast::<GenericTable>()
+            .as_ref()
+    }
+}
+
+/// Returns the REVM protocol architecture table.
+pub fn arch_table() -> Option<&'static ArchTable> {
+    let header = protocol_table()?;
+
+    // SAFETY:
+    //
+    // This reference is valid until `takeover()` is called, which has the safety invariant that
+    // all REVM protocol table references are not active.
+    unsafe {
+        (&raw const *header)
+            .wrapping_byte_add(u64_to_usize_strict(header.arch_table_offset))
+            .cast::<ArchTable>()
+            .as_ref()
+    }
 }
 
 /// Validates that the REVM protocol table is properly formatted and the versions of the table and
