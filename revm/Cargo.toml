@@ -12,5 +12,8 @@ conversion.workspace = true
 stub_api.workspace = true
 sync.workspace = true
 
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+aarch64.workspace = true
+
 [lints]
 workspace = true
