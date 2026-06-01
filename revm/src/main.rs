@@ -6,6 +6,7 @@
 
 pub mod log;
 pub mod stub_protocol;
+pub mod util;
 
 /// Generic handler for panics.
 #[panic_handler]
