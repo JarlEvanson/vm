@@ -10,6 +10,7 @@ repository.workspace = true
 conversion.workspace = true
 
 stub_api.workspace = true
+sync.workspace = true
 
 [lints]
 workspace = true
