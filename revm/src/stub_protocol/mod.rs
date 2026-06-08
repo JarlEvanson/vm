@@ -15,8 +15,12 @@ use stub_api::i686::{I686Table as ArchTable, I686TableV0 as ArchTableV0};
 #[cfg(target_arch = "x86_64")]
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
 
-use crate::arch::capabilities::{
-    arch_capability_support, initialize_arch_capability_support, validate_arch_capabilities_match,
+use crate::{
+    arch::capabilities::{
+        arch_capability_support, initialize_arch_capability_support,
+        validate_arch_capabilities_match,
+    },
+    memory::initialize_memory_management,
 };
 
 #[macro_use]
@@ -51,6 +55,11 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
         return Status::NOT_SUPPORTED;
     }
     early_debug!("{:#x?}", arch_capability_support());
+
+    // SAFETY:
+    //
+    // This function is called before any memory management functionality has been utilized.
+    unsafe { initialize_memory_management() }
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
 
