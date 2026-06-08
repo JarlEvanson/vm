@@ -21,3 +21,4 @@ use x86_64 as arch_impl;
 // ARCHITECTURE-SPECIFC FUNCTIONALITY WRAPPERS.
 
 pub mod capabilities;
+pub mod memory;
