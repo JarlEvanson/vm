@@ -6,6 +6,7 @@
 
 pub mod arch;
 pub mod log;
+pub mod memory;
 pub mod stub_protocol;
 pub mod util;
 
