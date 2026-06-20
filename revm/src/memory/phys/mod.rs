@@ -1,5 +1,6 @@
 //! Definitions and implementations of physical memory management services for use by `revm`.
 
+mod managed_region;
 mod structs;
 
 use core::{error, fmt};
