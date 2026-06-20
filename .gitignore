@@ -1,0 +1,9 @@
+# Ignore everything.
+*
+
+# Allow specific files and folders.
+!.gitignore
+
+!README.md
+!LICENSE-MIT
+!LICENSE-APACHE
