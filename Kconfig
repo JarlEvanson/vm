@@ -1,0 +1,25 @@
+mainmenu "REVM Configuration"
+
+choice ARCH
+    prompt "Target architecture"
+    default ARCH_AARCH64
+
+config ARCH_AARCH64
+    bool "aarch64"
+
+config ARCH_I686
+    bool "i686"
+
+config ARCH_X86_64
+    bool "x86_64"
+
+endchoice
+
+config TARGET_TRIPLET
+    string
+    default "aarch64-unknown-none" if ARCH_AARCH64
+    default "i686-unknown-none" if ARCH_I686
+    default "x86_64-unknown-none" if ARCH_X86_64
+
+source "stub/Kconfig"
+source "revm/Kconfig"
