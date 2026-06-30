@@ -3,9 +3,10 @@ include tools/build/convert-config/Makefile
 include tools/build/fix-dependencies/Makefile
 include tools/build/generate-makefile/Makefile
 include tools/build/generate-rust-project/Makefile
+include tools/build/package/Makefile
 
 .PHONY: build-tools
-build-tools: $(TOOLS_DIR)/fix-dependencies $(TOOLS_DIR)/generate-makefile $(TOOLS_DIR)/convert-config $(TOOLS_DIR)/generate-rust-project
+build-tools: $(TOOLS_DIR)/fix-dependencies $(TOOLS_DIR)/generate-makefile $(TOOLS_DIR)/convert-config $(TOOLS_DIR)/generate-rust-project $(TOOLS_DIR)/package
 
 $(BUILD_DIR_NATIVE)/convert-config-raw: $(BUILD_DIR_NATIVE_STAMP)
 	$(RUSTC) \
