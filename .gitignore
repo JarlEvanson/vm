@@ -7,3 +7,6 @@
 !README.md
 !LICENSE-MIT
 !LICENSE-APACHE
+
+!revm/
+!revm/**
