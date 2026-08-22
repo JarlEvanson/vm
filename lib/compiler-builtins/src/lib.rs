@@ -1,0 +1,8 @@
+#![allow(internal_features)]
+#![feature(compiler_builtins)]
+#![no_std]
+#![no_builtins]
+#![compiler_builtins]
+
+mod intrinsics;
+mod mem;
