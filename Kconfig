@@ -1,0 +1,56 @@
+mainmenu "REVM Configuration"
+
+menu "General Compiler Options"
+
+choice GENERAL_OPTIMIZATION_LEVEL
+    prompt "Compiler optimization level"
+    default GENERAL_OPTIMIZE_DEBUGGING
+
+config GENERAL_OPTIMIZE_PERFORMANCE
+    bool "Optimize for performance"
+    help
+      Enables standard performance optimizations.
+
+config GENERAL_OPTIMIZE_SIZE
+    bool "Optimize for size"
+    help
+      Enables size optimizations.
+
+config GENERAL_OPTIMIZE_DEBUGGING
+    bool "Optimize for debugging"
+    help
+      Enables optimizations that do not interfere with debugging.
+
+endchoice
+
+config GENERAL_INCREMENTAL
+    bool
+    default GENERAL_OPTIMIZE_DEBUGGING
+
+config GENERAL_DEBUG_ASSERTIONS
+    bool "Enable debug assertions"
+    default y
+
+config GENERAL_DEBUG_INFO
+    bool "Generate debug info"
+    default y
+
+choice GENERAL_LTO
+    prompt "Link-Time Optimization (LTO)"
+    default GENERAL_LTO_DISABLED
+
+config GENERAL_LTO_DISABLED
+    bool "Disable LTO"
+
+config GENERAL_LTO_THIN
+    bool "Thin LTO"
+
+config GENERAL_LTO_FAT
+    bool "Fat LTO"
+
+endchoice
+
+endmenu
+
+source stub/Kconfig
+source revm/Kconfig
