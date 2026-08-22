@@ -13,3 +13,6 @@
 
 !stub/
 !stub/**
+
+!target-specifications/
+!target-specifications/**
