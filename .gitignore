@@ -8,6 +8,8 @@
 !LICENSE-MIT
 !LICENSE-APACHE
 
+!Kconfig
+
 !revm/
 !revm/**
 

@@ -1,0 +1,80 @@
+menu "Revm Stub"
+
+menu "Compiler Options"
+
+choice STUB_ARCH
+    prompt "Target Architecture (revm-stub)"
+    default STUB_ARCH_AARCH64
+
+config STUB_ARCH_AARCH64
+    bool "aarch64"
+
+config STUB_ARCH_I686
+    bool "i686"
+
+config STUB_ARCH_X86_64
+    bool "x86_64"
+
+endchoice
+
+config STUB_ARCH_TARGET_TRIPLET
+    string
+    default "aarch64-unknown-none" if STUB_ARCH_AARCH64
+    default "i686-unknown-none" if STUB_ARCH_I686
+    default "x86_64-unknown-none" if STUB_ARCH_X86_64
+
+choice STUB_OPTIMIZATION_LEVEL
+    prompt "Compiler optimization level"
+    default STUB_OPTIMIZE_PERFORMANCE if GENERAL_OPTIMIZE_PERFORMANCE
+    default STUB_OPTIMIZE_SIZE if GENERAL_OPTIMIZE_SIZE
+    default STUB_OPTIMIZE_DEBUGGING if GENERAL_OPTIMIZE_DEBUGGING
+
+config STUB_OPTIMIZE_PERFORMANCE
+    bool "Optimize for performance"
+    help
+      Enables standard performance optimizations.
+
+config STUB_OPTIMIZE_SIZE
+    bool "Optimize for size"
+    help
+      Enables size optimizations.
+
+config STUB_OPTIMIZE_DEBUGGING
+    bool "Optimize for debugging"
+    help
+      Enables optimizations that do not interfere with debugging.
+
+endchoice
+
+config STUB_INCREMENTAL
+    bool
+    default STUB_OPTIMIZE_DEBUGGING
+
+config STUB_DEBUG_ASSERTIONS
+    bool "Enable debug assertions"
+    default GENERAL_DEBUG_ASSERTIONS
+
+config STUB_DEBUG_INFO
+    bool "Generate debug info"
+    default GENERAL_DEBUG_INFO
+
+choice STUB_LTO
+    prompt "Link-Time Optimization (LTO)"
+    default STUB_LTO_DISABLED if GENERAL_LTO_DISABLED
+    default STUB_LTO_THIN if GENERAL_LTO_THIN
+    default STUB_LTO_FAT if GENERAL_LTO_FAT
+
+config STUB_LTO_DISABLED
+    bool "Disable LTO"
+
+config STUB_LTO_THIN
+    bool "Thin LTO"
+
+config STUB_LTO_FAT
+    bool "Fat LTO"
+
+endchoice
+
+endmenu
+
+endmenu
