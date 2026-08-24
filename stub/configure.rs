@@ -18,6 +18,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
 
     subproject.add_libraries("conversion");
     subproject.add_libraries("memory");
+    subproject.add_libraries("stub-api");
     subproject.add_libraries("sync");
 
     subprojects.push(subproject);
