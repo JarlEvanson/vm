@@ -83,5 +83,5 @@ pub(in crate::platform) trait ProcessorManager: Send + Sync {
     fn run_on_all_processors(&self, procedure: Procedure, argument: *mut ());
 }
 
-/// The function prototype required for [`ProcessorManager::run_on_all_processors`]
+/// The function prototype required for [`run_on_all_processors()`]
 pub type Procedure = extern "C" fn(cpu_id: u64, arg: *mut ());

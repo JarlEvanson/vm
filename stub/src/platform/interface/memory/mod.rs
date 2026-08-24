@@ -7,12 +7,14 @@ use sync::ControlledModificationCell;
 
 mod mem_structs;
 mod phys;
+mod virt;
 
 pub use mem_structs::{
     Frame, FrameRange, Page, PageRange, PhysicalAddress, PhysicalAddressRange, VirtualAddress,
     VirtualAddressRange,
 };
 pub use phys::*;
+pub use virt::*;
 
 /// The current [`MemoryConfig`].
 static MEMORY_CONFIG: ControlledModificationCell<Option<MemoryConfig>> =

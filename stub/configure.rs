@@ -16,6 +16,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     subproject.disable_host();
     subproject.disable_revm();
 
+    subproject.add_libraries("conversion");
     subproject.add_libraries("memory");
     subproject.add_libraries("sync");
 
