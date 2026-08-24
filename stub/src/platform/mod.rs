@@ -10,5 +10,6 @@ mod graphics;
 #[cfg(CONFIG_STUB_CUSTOM_HEAP_ALLOCATOR)]
 mod heap_allocator;
 mod interface;
+mod relocate;
 
 pub use interface::*;
