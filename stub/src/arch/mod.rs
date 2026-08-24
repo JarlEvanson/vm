@@ -1,12 +1,16 @@
 //! Architecture-specific code.
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+
+#[cfg(target_arch = "aarch64")]
+use aarch64 as arch;
+
 pub mod interface;
 
 /// Architecture-specific memory management code.
 pub mod memory {
-    pub use super::arch::memory::{
-        paging::Aarch64TranslationScheme as ArchTranslationScheme, physical_bits,
-    };
+    pub use super::arch::memory::{paging::ArchTranslationScheme, physical_bits};
 }
 
 /// Architecture-dependent relocation code.
