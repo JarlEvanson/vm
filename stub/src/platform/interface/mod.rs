@@ -2,5 +2,7 @@
 //! the executable.
 
 mod memory;
+mod tables;
 
 pub use memory::*;
+pub use tables::*;
