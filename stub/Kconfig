@@ -8,12 +8,14 @@ choice STUB_ARCH
 
 config STUB_ARCH_AARCH64
     bool "aarch64"
+    select STUB_PLATFORM_SUPPORTS_LIMINE
 
 config STUB_ARCH_I686
     bool "i686"
 
 config STUB_ARCH_X86_64
     bool "x86_64"
+    select STUB_PLATFORM_SUPPORTS_LIMINE
 
 endchoice
 
@@ -76,6 +78,9 @@ config STUB_LTO_FAT
 endchoice
 
 endmenu
+
+config STUB_PLATFORM_SUPPORTS_LIMINE
+    bool
 
 source stub/src/platform/Kconfig
 

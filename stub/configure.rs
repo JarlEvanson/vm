@@ -34,6 +34,9 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
         subproject.add_libraries("font");
     }
 
+    if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_LIMINE") {
+        subproject.add_libraries("limine");
+    }
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         subproject.add_libraries("uefi");
     }

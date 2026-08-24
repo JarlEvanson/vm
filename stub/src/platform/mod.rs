@@ -2,12 +2,18 @@
 //! required to carry out `revm-stub`'s goal.
 
 // Platform support modules.
+#[cfg(CONFIG_STUB_PLATFORM_LIMINE)]
+mod limine;
 #[cfg(CONFIG_STUB_PLATFORM_UEFI)]
 mod uefi;
 
+#[cfg(CONFIG_STUB_PLATFORM_LIMINE)]
+use limine::limine_main;
 #[cfg(CONFIG_STUB_PLATFORM_UEFI)]
 use uefi::uefi_main;
 
+#[cfg(not(CONFIG_STUB_PLATFORM_LIMINE))]
+use dummy_main as limine_main;
 #[cfg(not(CONFIG_STUB_PLATFORM_UEFI))]
 use dummy_main as uefi_main;
 
@@ -42,14 +48,21 @@ core::arch::global_asm! {
 
     "b.ne 5f", // Branch if `relocate` failed.
 
-    "b {uefi_main}",
+    "cbnz x0, {uefi_main}", // If the first argument is non-zero, then this was booted using UEFI.
+    "b {limine_main}",
 
     "5:",
-    // Return with x0 = 0x8000000000000001 (LOAD_ERROR).
+    "cbz x0, 6f", // If first argument is zero, spin forever (it's Limine).
+
+    // Otherwise, return with x0 = 0x8000000000000001 (LOAD_ERROR).
     "mov x0, #1",
     "orr x0, x0, #0x8000000000000000",
     "ret",
 
+    "6:",
+    "b 6b",
+
+    limine_main = sym limine_main,
     uefi_main = sym uefi_main,
 }
 
@@ -91,13 +104,22 @@ core::arch::global_asm! {
     "cmp rax, 0",   // Check for successful `relocate`.
     "jne 5f",       // Jump if failed.
 
-    "jmp {uefi_main}",
+    "cmp rcx, 0", // If the first argument is non-zero, then this was booted using UEFI.
+    "jne {uefi_main}",
+    "jmp {limine_main}",
 
     "5:",
-    // Return with rax = 0x8000000000000001 (LOAD_ERROR).
+    "cmp rcx, 0", // If zero, then spin forever (it's Limine).
+    "je 6f",
+
+    // Otherwise, return with rax = 0x8000000000000001 (LOAD_ERROR).
     "mov rax, 0x8000000000000001",
     "ret",
 
+    "6:",
+    "jmp 6b",
+
+    limine_main = sym limine_main,
     uefi_main = sym uefi_main,
 }
 

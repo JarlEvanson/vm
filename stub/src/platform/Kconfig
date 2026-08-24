@@ -3,10 +3,17 @@ menu "Platforms"
 config STUB_PLATFORM_UEFI
     bool "Enable booting from UEFI"
 
+config STUB_PLATFORM_LIMINE
+    bool "Enable booting from Limine"
+    depends on STUB_PLATFORM_SUPPORTS_LIMINE
+    select STUB_CUSTOM_HEAP_ALLOCATOR
+    select STUB_GRAPHICS
+    select STUB_SELF_FRAME_ALLOCATOR
+
 config STUB_PLATFORMS_VALID
     bool
     default y
-    depends on STUB_PLATFORM_UEFI
+    depends on STUB_PLATFORM_UEFI || STUB_PLATFORM_LIMINE
 
 config STUB_CUSTOM_HEAP_ALLOCATOR
     bool

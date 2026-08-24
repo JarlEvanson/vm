@@ -50,6 +50,13 @@ SECTIONS {
         *(.data .data.*)
     } :data
 
+    .limine : {
+        *(.limine.start)
+        *(.limine.base_tag)
+        *(.limine.requests .limine.requests.*)
+        *(.limine.end)
+    } :data
+
     .bss : {
         *(.bss .bss.*)
     } :data
