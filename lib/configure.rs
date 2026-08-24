@@ -4,6 +4,8 @@ use crate::config::{Config, Subproject};
 mod arch;
 #[path = "compiler-builtins/configure.rs"]
 mod compiler_builtins;
+#[path = "firmware/configure.rs"]
+mod firmware;
 #[path = "format/configure.rs"]
 mod format;
 #[path = "misc/configure.rs"]
@@ -17,6 +19,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     arch::configure(config, subprojects);
     core_configure(config, subprojects);
     compiler_builtins::configure(config, subprojects);
+    firmware::configure(config, subprojects);
     format::configure(config, subprojects);
     misc::configure(config, subprojects);
     platform::configure(config, subprojects);
