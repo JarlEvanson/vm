@@ -21,3 +21,6 @@
 
 !target-specifications/
 !target-specifications/**
+
+!tools/
+!tools/**
