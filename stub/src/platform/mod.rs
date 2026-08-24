@@ -3,6 +3,8 @@
 
 // Other support modules.
 
+#[cfg(CONFIG_STUB_SELF_FRAME_ALLOCATOR)]
+mod frame_allocator;
 #[cfg(CONFIG_STUB_GRAPHICS)]
 mod graphics;
 mod interface;

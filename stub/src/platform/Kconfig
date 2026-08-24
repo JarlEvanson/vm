@@ -3,4 +3,7 @@ menu "Platforms"
 config STUB_GRAPHICS
     bool
 
+config STUB_SELF_FRAME_ALLOCATOR
+    bool
+
 endmenu
