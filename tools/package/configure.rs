@@ -13,6 +13,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
 
     subproject.add_libraries("conversion");
     subproject.add_libraries("elf");
+    subproject.add_libraries("linux");
     subproject.add_libraries("pe");
 
     subprojects.push(subproject);
