@@ -7,6 +7,8 @@
 mod frame_allocator;
 #[cfg(CONFIG_STUB_GRAPHICS)]
 mod graphics;
+#[cfg(CONFIG_STUB_CUSTOM_HEAP_ALLOCATOR)]
+mod heap_allocator;
 mod interface;
 
 pub use interface::*;

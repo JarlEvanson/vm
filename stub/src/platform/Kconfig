@@ -1,5 +1,8 @@
 menu "Platforms"
 
+config STUB_CUSTOM_HEAP_ALLOCATOR
+    bool
+
 config STUB_GRAPHICS
     bool
 
