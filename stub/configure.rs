@@ -24,6 +24,10 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
 
     if config.kconfig.contains_key("CONFIG_STUB_ARCH_AARCH64") {
         subproject.add_libraries("aarch64");
+    } else if config.kconfig.contains_key("CONFIG_STUB_ARCH_I686")
+        || config.kconfig.contains_key("CONFIG_STUB_ARCH_X86_64")
+    {
+        subproject.add_libraries("x86");
     }
 
     subprojects.push(subproject);
