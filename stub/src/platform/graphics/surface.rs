@@ -306,6 +306,234 @@ unsafe impl<S: Surface> Surface for &mut S {
     }
 }
 
+/// Generic implementation of a pixel based framebuffer.
+#[derive(Debug)]
+pub struct GenericSurface {
+    /// The virtual address of the [`Surface`].
+    address: *mut u8,
+    /// The width of the [`Surface`] in pixels.
+    width: usize,
+    /// The height of the [`Surface`] in pixels.
+    height: usize,
+    /// The number of bytes between the start of one line and the start of an adjacent line.
+    pitch: usize,
+    /// The number of bits in a pixel.
+    bpp: u16,
+    /// The number of bits in the red bitmask.
+    red_mask_size: u8,
+    /// The offset of the bits in the red bitmask.
+    red_mask_shift: u8,
+    /// The number of bits in the green bitmask.
+    green_mask_size: u8,
+    /// The offset of the bits in the green bitmask.
+    green_mask_shift: u8,
+    /// The number of bits in the blue bitmask.
+    blue_mask_size: u8,
+    /// The offset of the bits in the blue bitmask.
+    blue_mask_shift: u8,
+}
+
+impl GenericSurface {
+    /// Creates a new [`GenericSurface`].
+    ///
+    /// # Safety
+    ///
+    /// The region of memory demarcated by `address` that extends `pitch * height` bytes must be
+    /// writable and under the exclusive control of [`GenericSurface`] if successful.
+    #[expect(clippy::too_many_arguments)]
+    pub unsafe fn new(
+        address: *mut u8,
+        width: usize,
+        height: usize,
+        pitch: usize,
+        bpp: u16,
+        red_mask_size: u8,
+        red_mask_shift: u8,
+        green_mask_size: u8,
+        green_mask_shift: u8,
+        blue_mask_size: u8,
+        blue_mask_shift: u8,
+    ) -> Option<Self> {
+        let max_x = width.saturating_sub(1);
+        let max_x_bit_offset = max_x.checked_mul(usize::from(bpp))?;
+
+        let max_y = height.saturating_sub(1);
+        let max_y_bit_offset = max_y.checked_mul(pitch)?.checked_mul(8)?;
+        let _ = max_x_bit_offset.checked_add(max_y_bit_offset)?;
+
+        match bpp {
+            8 | 16 | 32 | 64 => {}
+            _ => {
+                // TODO: support an arbitrary number of bits per pixel
+                return None;
+            }
+        }
+
+        let surface = Self {
+            address,
+            width,
+            height,
+            pitch,
+            bpp,
+            red_mask_size,
+            red_mask_shift,
+            green_mask_size,
+            green_mask_shift,
+            blue_mask_size,
+            blue_mask_shift,
+        };
+
+        Some(surface)
+    }
+}
+
+// SAFETY:
+//
+// Read and write bounds checking are properly implemented.
+unsafe impl Surface for GenericSurface {
+    fn width(&self) -> usize {
+        self.width
+    }
+
+    fn height(&self) -> usize {
+        self.height
+    }
+
+    unsafe fn write_pixel_unchecked(&mut self, point: Point, value: u32) {
+        let x_bit_offset = point.x * usize::from(self.bpp);
+        let y_bit_offset = point.y * self.pitch * 8;
+        let bit_offset = x_bit_offset + y_bit_offset;
+
+        let red = convert_from_rgba(value, self.red_mask_size, 0) << self.red_mask_shift;
+        let green = convert_from_rgba(value, self.green_mask_size, 1) << self.green_mask_shift;
+        let blue = convert_from_rgba(value, self.blue_mask_size, 2) << self.blue_mask_shift;
+        let color = red | green | blue;
+
+        let address = self.address.wrapping_byte_add(bit_offset / 8);
+        match self.bpp {
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            #[expect(clippy::cast_possible_truncation, reason = "truncation")]
+            8 => unsafe { address.write_volatile(color as u8) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            #[expect(clippy::cast_possible_truncation, reason = "truncation")]
+            16 => unsafe { address.cast::<u16>().write_volatile(color as u16) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            #[expect(clippy::cast_possible_truncation, reason = "truncation")]
+            32 => unsafe { address.cast::<u32>().write_volatile(color as u32) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            64 => unsafe { address.cast::<u64>().write_volatile(color) },
+            _ => todo!("support an arbitrary number of bits per pixel"),
+        }
+    }
+
+    unsafe fn read_pixel_unchecked(&self, point: Point) -> u32 {
+        let x_bit_offset = point.x * usize::from(self.bpp);
+        let y_bit_offset = point.y * self.pitch * 8;
+        let bit_offset = x_bit_offset + y_bit_offset;
+
+        let address = self.address.wrapping_byte_add(bit_offset / 8);
+        let value = match self.bpp {
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            8 => unsafe { u64::from(address.read_volatile()) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            16 => unsafe { u64::from(address.cast::<u16>().read_volatile()) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            32 => unsafe { u64::from(address.cast::<u32>().read_volatile()) },
+            // SAFETY:
+            //
+            // `address` is within bounds and is suitable to volatile writes.
+            64 => unsafe { address.cast::<u64>().read_volatile() },
+            _ => todo!("support an arbitrary number of bits per pixel"),
+        };
+
+        let red = convert_to_rgba(value >> self.red_mask_shift, self.red_mask_size, 0);
+        let green = convert_to_rgba(value >> self.green_mask_shift, self.green_mask_size, 0);
+        let blue = convert_to_rgba(value >> self.blue_mask_shift, self.blue_mask_size, 0);
+
+        red | green | blue
+    }
+
+    fn copy_within(&mut self, write: Region, source: Point) -> Result<(), OutOfBoundsError> {
+        if !region_in_bounds(write, self.width(), self.height()) {
+            return Err(OutOfBoundsError);
+        }
+
+        let read = Region {
+            point: source,
+            width: write.width,
+            height: write.height,
+        };
+        if !region_in_bounds(read, self.width(), self.height()) {
+            return Err(OutOfBoundsError);
+        }
+
+        assert!(self.bpp >= 8);
+        let write_index = write.point.x + write.point.y * self.pitch;
+        let read_index = read.point.x + read.point.y * self.pitch;
+
+        let mut write_ptr = self.address.wrapping_byte_add(write_index);
+        let mut read_ptr = self.address.wrapping_byte_add(read_index);
+
+        let bytes_per_pixel = usize::from(self.bpp.div_ceil(8));
+        for _ in 0..write.height {
+            // SAFETY:
+            //
+            // This operation is performed on framebuffer memory and has had its bounds checked.
+            unsafe { core::ptr::copy(read_ptr, write_ptr, write.width.strict_mul(bytes_per_pixel)) }
+            write_ptr = write_ptr.wrapping_byte_add(self.pitch);
+            read_ptr = read_ptr.wrapping_byte_add(self.pitch);
+        }
+
+        Ok(())
+    }
+}
+
+// SAFETY:
+//
+// The pointer contained by [`GenericSurface`] does not provide access to thread-local or cpu-local
+// memory and thus [`GenericSurface`] is [`Send`].
+unsafe impl Send for GenericSurface {}
+
+// SAFETY:
+//
+// All exposed methods provided by [`GenericSurface`] cannot mutate with an immutable reference and
+// thus [`GenericSurface`] is [`Sync`].
+unsafe impl Sync for GenericSurface {}
+
+/// Converts a generic pixel value to its RGBA representation.
+const fn convert_to_rgba(value: u64, size: u8, index: u8) -> u32 {
+    let max_value_foreign = (1u64 << size) - 1;
+    let converted_value_foreign = (value * 255) / max_value_foreign;
+
+    #[expect(clippy::cast_possible_truncation, reason = "truncation")]
+    {
+        (converted_value_foreign << (index * 8)) as u32
+    }
+}
+
+/// Converts an RGBA pixel value to its generic representation.
+const fn convert_from_rgba(value: u32, size: u8, index: u8) -> u64 {
+    #[expect(clippy::cast_possible_truncation, reason = "truncation")]
+    let extracted_value = (value >> (index * 8)) as u8;
+
+    let max_value_foreign = (1u64 << size) - 1;
+    (extracted_value as u64 * max_value_foreign) / 255
+}
+
 /// A requested operation would have been out of bounds.
 #[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OutOfBoundsError;
