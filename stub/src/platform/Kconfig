@@ -1,0 +1,6 @@
+menu "Platforms"
+
+config STUB_GRAPHICS
+    bool
+
+endmenu

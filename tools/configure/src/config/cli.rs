@@ -15,6 +15,7 @@ pub(in crate::config) fn parse() -> Result<ParseArgumentsAction, ParseArgumentsE
     let mut source_dir = None;
     let mut build_dir = None;
     let mut out_dir = None;
+    let mut font_path = None;
     let mut verbose = false;
     while let Some(arg) = args.next() {
         let assignment = if arg == "--help" {
@@ -33,6 +34,8 @@ pub(in crate::config) fn parse() -> Result<ParseArgumentsAction, ParseArgumentsE
             &mut build_dir
         } else if arg == "--out-dir" {
             &mut out_dir
+        } else if arg == "--font-path" {
+            &mut font_path
         } else if arg == "--verbose" {
             verbose = true;
             continue;
@@ -59,6 +62,13 @@ pub(in crate::config) fn parse() -> Result<ParseArgumentsAction, ParseArgumentsE
     let build_dir = PathBuf::from(build_dir.unwrap_or_else(|| OsString::from("build")));
     let out_dir = PathBuf::from(out_dir.unwrap_or_else(|| OsString::from("out")));
 
+    let font_path = font_path.map(PathBuf::from).unwrap_or_else(|| {
+        let mut font_path = PathBuf::from(".");
+        font_path.push("assets");
+        font_path.push("Tamsyn8x16r.psf");
+        font_path
+    });
+
     let arguments = Arguments {
         rustc,
         host_triplet,
@@ -69,6 +79,8 @@ pub(in crate::config) fn parse() -> Result<ParseArgumentsAction, ParseArgumentsE
         source_dir,
         build_dir,
         out_dir,
+
+        font_path,
 
         verbose,
     };
@@ -87,6 +99,8 @@ pub struct Arguments {
     pub source_dir: PathBuf,
     pub build_dir: PathBuf,
     pub out_dir: PathBuf,
+
+    pub font_path: PathBuf,
 
     pub verbose: bool,
 }
@@ -176,6 +190,11 @@ pub fn usage() {
             "--out-dir",
             "DIR",
             "Directory to write final compiled tools and binaries [default: out]",
+        ),
+        (
+            "--font-path",
+            "PATH",
+            "Path to a font file utilize (default: assets/Tamsyn8x16r.psf)",
         ),
         ("--verbose", "", "Use verbose output"),
     ];

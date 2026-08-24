@@ -3,6 +3,8 @@
 
 // Other support modules.
 
+#[cfg(CONFIG_STUB_GRAPHICS)]
+mod graphics;
 mod interface;
 
 pub use interface::*;

@@ -1,4 +1,8 @@
-use std::{borrow::Cow, collections::HashSet};
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    path::{Component, Path, PathBuf},
+};
 
 use crate::{
     config::{Config, Kind, Target, library_artifact_name},
@@ -136,6 +140,12 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     configure.add_variable(command);
     file.add_rules(configure);
 
+    let mut convert_font = Rule::new("convert_font");
+    let mut command = Variable::new("command");
+    command.push_literal("'$font_converter' '$in' '$out_dir'");
+    convert_font.add_variable(command);
+    file.add_rules(convert_font);
+
     let mut package = Rule::new("package");
     let mut command = Variable::new("command");
     command.push_literal("'$packager' $in '$out'");
@@ -206,6 +216,33 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
 
             if driver == "clippy" {
                 build.add_implicit(FilePath::from_literal("ALWAYS"));
+            }
+
+            if subproject_info.name == "revm-stub" {
+                build.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+                    config
+                        .arguments
+                        .build_dir
+                        .join("glyph-array.bin")
+                        .as_os_str(),
+                )));
+                build.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+                    config.arguments.build_dir.join("font-map.bin").as_os_str(),
+                )));
+
+                let font_dir = if config.arguments.build_dir.is_relative()
+                    || config.arguments.source_dir.is_relative()
+                {
+                    make_relative(&config.arguments.build_dir, &config.arguments.source_dir)
+                } else {
+                    config.arguments.build_dir.clone()
+                };
+
+                let mut env = Variable::new("env");
+                env.push_literal("BUILD_DIR='");
+                env.push_escaped(os_str_to_bytes(font_dir.as_os_str()));
+                env.push_literal("'");
+                build.add_variable(env);
             }
 
             let mut driver_var = Variable::new("driver");
@@ -295,6 +332,33 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
         let explicit =
             FilePath::from_escaped(os_str_to_bytes(subproject_info.root_module.as_os_str()));
         build.add_explicit(explicit);
+
+        if subproject_info.name == "revm-stub" {
+            build.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+                config
+                    .arguments
+                    .build_dir
+                    .join("glyph-array.bin")
+                    .as_os_str(),
+            )));
+            build.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+                config.arguments.build_dir.join("font-map.bin").as_os_str(),
+            )));
+
+            let font_dir = if config.arguments.build_dir.is_relative()
+                || config.arguments.source_dir.is_relative()
+            {
+                make_relative(&config.arguments.build_dir, &config.arguments.source_dir)
+            } else {
+                config.arguments.build_dir.clone()
+            };
+
+            let mut env = Variable::new("env");
+            env.push_literal("BUILD_DIR='");
+            env.push_escaped(os_str_to_bytes(font_dir.as_os_str()));
+            env.push_literal("'");
+            build.add_variable(env);
+        }
 
         let mut crate_name = Variable::new("crate_name");
         crate_name.push_escaped(convert_name_to_rust_name(&subproject_info.name));
@@ -397,6 +461,38 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     reconfigure.add_variable(generator_var);
 
     file.add_build(reconfigure);
+
+    let mut font_converter_path = config.arguments.build_dir.join(Target::Build.folder());
+    font_converter_path.push("rustc");
+    font_converter_path.push("font-converter");
+
+    let mut font_converter = Build::new("convert_font");
+    font_converter.add_output(FilePath::from_escaped(os_str_to_bytes(
+        config
+            .arguments
+            .build_dir
+            .join("glyph-array.bin")
+            .as_os_str(),
+    )));
+    font_converter.add_output(FilePath::from_escaped(os_str_to_bytes(
+        config.arguments.build_dir.join("font-map.bin").as_os_str(),
+    )));
+    font_converter.add_explicit(FilePath::from_escaped(os_str_to_bytes(
+        config.arguments.font_path.as_os_str(),
+    )));
+    font_converter.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+        font_converter_path.as_os_str(),
+    )));
+
+    let mut font_converter_var = Variable::new("font_converter");
+    font_converter_var.push_escaped(os_str_to_bytes(font_converter_path.as_os_str()));
+    font_converter.add_variable(font_converter_var);
+
+    let mut out_dir_var = Variable::new("out_dir");
+    out_dir_var.push_escaped(os_str_to_bytes(config.arguments.build_dir.as_os_str()));
+    font_converter.add_variable(out_dir_var);
+
+    file.add_build(font_converter);
 
     let mut packager_path = config.arguments.build_dir.join(Target::Build.folder());
     packager_path.push("rustc");
@@ -527,6 +623,39 @@ fn add_arguments(config: &Config, command: &mut Variable, target: Target) {
 
     command.push_literal(" -C lto=");
     command.push_literal(opts.lto.option());
+}
+
+fn make_relative(target: &Path, base: &Path) -> PathBuf {
+    let mut target_comps = target.components().peekable();
+    let mut base_comps = base.components().peekable();
+
+    // Advance both iterators while  components match (finding the common prefix).
+    while let (Some(t), Some(b)) = (target_comps.peek(), base_comps.peek()) {
+        if t == b {
+            target_comps.next();
+            base_comps.next();
+        } else if t == &Component::CurDir {
+            target_comps.next();
+        } else if b == &Component::CurDir {
+            base_comps.next();
+        } else {
+            break;
+        }
+    }
+
+    let mut result = PathBuf::new();
+
+    // For every remaining component in the base path, append `../`.
+    for _ in base_comps {
+        result.push("..");
+    }
+
+    // Append the remaining components from the target path.
+    for t in target_comps {
+        result.push(t);
+    }
+
+    result
 }
 
 #[derive(Clone, Debug)]

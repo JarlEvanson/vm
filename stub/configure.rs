@@ -30,5 +30,9 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
         subproject.add_libraries("x86");
     }
 
+    if config.kconfig.contains_key("CONFIG_STUB_GRAPHICS") {
+        subproject.add_libraries("font");
+    }
+
     subprojects.push(subproject);
 }
