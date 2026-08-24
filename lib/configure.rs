@@ -1,5 +1,7 @@
 use crate::config::{Config, Subproject};
 
+#[path = "arch/configure.rs"]
+mod arch;
 #[path = "compiler-builtins/configure.rs"]
 mod compiler_builtins;
 #[path = "format/configure.rs"]
@@ -10,6 +12,7 @@ mod misc;
 mod stub_api;
 
 pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
+    arch::configure(config, subprojects);
     core_configure(config, subprojects);
     compiler_builtins::configure(config, subprojects);
     format::configure(config, subprojects);
