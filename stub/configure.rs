@@ -33,12 +33,19 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     if config.kconfig.contains_key("CONFIG_STUB_GRAPHICS") {
         subproject.add_libraries("font");
     }
+    if config.kconfig.contains_key("CONFIG_STUB_DEVICE_TREE") {
+        subproject.add_libraries("device-tree");
+    }
 
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_LIMINE") {
         subproject.add_libraries("limine");
     }
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         subproject.add_libraries("uefi");
+    }
+    if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_LINUX") {
+        subproject.add_libraries("linux");
+        subproject.add_libraries("pe");
     }
 
     if !config.kconfig.contains_key("CONFIG_STUB_PLATFORMS_VALID") {

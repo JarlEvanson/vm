@@ -10,12 +10,22 @@ config STUB_PLATFORM_LIMINE
     select STUB_GRAPHICS
     select STUB_SELF_FRAME_ALLOCATOR
 
+config STUB_PLATFORM_LINUX
+    bool "Enable booting using the Linux boot protocol"
+    select STUB_CUSTOM_HEAP_ALLOCATOR
+    select STUB_DEVICE_TREE
+    select STUB_GRAPHICS
+    select STUB_SELF_FRAME_ALLOCATOR
+
 config STUB_PLATFORMS_VALID
     bool
     default y
     depends on STUB_PLATFORM_UEFI || STUB_PLATFORM_LIMINE
 
 config STUB_CUSTOM_HEAP_ALLOCATOR
+    bool
+
+config STUB_DEVICE_TREE
     bool
 
 config STUB_GRAPHICS
