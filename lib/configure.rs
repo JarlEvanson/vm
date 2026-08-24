@@ -8,6 +8,8 @@ mod compiler_builtins;
 mod format;
 #[path = "misc/configure.rs"]
 mod misc;
+#[path = "platform/configure.rs"]
+mod platform;
 #[path = "stub-api/configure.rs"]
 mod stub_api;
 
@@ -17,6 +19,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     compiler_builtins::configure(config, subprojects);
     format::configure(config, subprojects);
     misc::configure(config, subprojects);
+    platform::configure(config, subprojects);
     stub_api::configure(config, subprojects);
 }
 
