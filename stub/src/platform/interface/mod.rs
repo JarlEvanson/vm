@@ -2,7 +2,9 @@
 //! the executable.
 
 mod memory;
+mod processor;
 mod tables;
 
 pub use memory::*;
+pub use processor::*;
 pub use tables::*;
