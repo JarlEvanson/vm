@@ -136,6 +136,12 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     configure.add_variable(command);
     file.add_rules(configure);
 
+    let mut package = Rule::new("package");
+    let mut command = Variable::new("command");
+    command.push_literal("'$packager' $in '$out'");
+    package.add_variable(command);
+    file.add_rules(package);
+
     let tools_dir = config.arguments.out_dir.join("tools");
 
     let mut clippy_paths = Vec::new();
@@ -392,11 +398,53 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
 
     file.add_build(reconfigure);
 
+    let mut packager_path = config.arguments.build_dir.join(Target::Build.folder());
+    packager_path.push("rustc");
+    packager_path.push("package");
+
+    let mut revm_path = config.arguments.build_dir.join(Target::Revm.folder());
+    revm_path.push("rustc");
+    revm_path.push("revm");
+
+    let mut revm_stub_path = config.arguments.build_dir.join(Target::RevmStub.folder());
+    revm_stub_path.push("rustc");
+    revm_stub_path.push("revm-stub");
+
+    let packaged_path = config.arguments.out_dir.join("revm");
+
+    let mut package = Build::new("package");
+    package.add_output(FilePath::from_escaped(os_str_to_bytes(
+        packaged_path.as_os_str(),
+    )));
+    package.add_implicit(FilePath::from_escaped(os_str_to_bytes(
+        packager_path.as_os_str(),
+    )));
+    package.add_explicit(FilePath::from_escaped(os_str_to_bytes(
+        revm_stub_path.as_os_str(),
+    )));
+    package.add_explicit(FilePath::from_escaped(os_str_to_bytes(
+        revm_path.as_os_str(),
+    )));
+
+    let mut packager = Variable::new("packager");
+    packager.push_escaped(os_str_to_bytes(packager_path.as_os_str()));
+    package.add_variable(packager);
+
+    file.add_build(package);
+
+    let mut package = Build::new("phony");
+    package.add_output(FilePath::from_literal("package"));
+    package.add_explicit(FilePath::from_escaped(os_str_to_bytes(
+        packaged_path.as_os_str(),
+    )));
+    file.add_build(package);
+
     let mut always = Build::new("phony");
     always.add_output(FilePath::from_literal("ALWAYS"));
     file.add_build(always);
 
     file.add_default(FilePath::from_literal("tools"));
+    file.add_default(FilePath::from_literal("package"));
 
     file.write_out(output);
 }
