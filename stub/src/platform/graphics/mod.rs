@@ -1,5 +1,6 @@
 //! Definitions of various graphics APIs and a graphical console based on those APIs.
 
+pub mod console;
 pub mod surface;
 
 pub mod font {
