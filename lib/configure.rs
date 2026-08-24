@@ -2,10 +2,13 @@ use crate::config::{Config, Subproject};
 
 #[path = "compiler-builtins/configure.rs"]
 mod compiler_builtins;
+#[path = "misc/configure.rs"]
+mod misc;
 
 pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     core_configure(config, subprojects);
     compiler_builtins::configure(config, subprojects);
+    misc::configure(config, subprojects);
 }
 
 fn core_configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
