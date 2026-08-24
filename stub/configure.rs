@@ -34,5 +34,17 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
         subproject.add_libraries("font");
     }
 
+    if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
+        subproject.add_libraries("uefi");
+    }
+
+    if !config.kconfig.contains_key("CONFIG_STUB_PLATFORMS_VALID") {
+        eprintln!("=========================================================");
+        eprintln!("ERROR: Configuration validation failed!");
+        eprintln!("You must select at least one boot platform for revm-stub.");
+        eprintln!("=========================================================");
+        std::process::exit(1)
+    }
+
     subprojects.push(subproject);
 }
