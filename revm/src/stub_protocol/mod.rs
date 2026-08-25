@@ -2,7 +2,7 @@
 
 use core::{
     mem, ptr,
-    sync::atomic::{AtomicPtr, Ordering},
+    sync::atomic::{AtomicBool, AtomicPtr, Ordering},
 };
 
 use conversion::{u64_to_usize_strict, usize_to_u64};
@@ -14,6 +14,10 @@ use stub_api::aarch64::{Aarch64Table as ArchTable, Aarch64TableV0 as ArchTableV0
 use stub_api::i686::{I686Table as ArchTable, I686TableV0 as ArchTableV0};
 #[cfg(target_arch = "x86_64")]
 use stub_api::x86_64::{X86_64Table as ArchTable, X86_64TableV0 as ArchTableV0};
+
+use crate::arch::interface::capabilities::{
+    arch_capability_support, initialize_arch_capability_support, validate_arch_capabilities_match,
+};
 
 #[macro_use]
 pub mod log;
@@ -42,6 +46,12 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     early_debug!("Image Start: {:#x}", crate::util::image_start());
     early_debug!("Command Line: {command_line:?}");
     early_debug!("{arch_table:#x?}");
+
+    if !initalize_and_validate_arch_capability_support(generic_table) {
+        early_error!("mismatched architecture capabilities: exiting");
+        return Status::NOT_SUPPORTED;
+    }
+    early_debug!("{:#x?}", arch_capability_support());
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
 
@@ -162,4 +172,43 @@ fn validate_protocol_table(
     };
 
     Ok((generic_table, arch_table, command_line))
+}
+
+/// Initializes the architectural capabilities data and validates that all cores share the
+/// architectural capabilities.
+fn initalize_and_validate_arch_capability_support(generic_table: &GenericTable) -> bool {
+    extern "C" fn validate_same_arch_capability_support(_: u64, arg: *mut ()) {
+        let arg = arg.cast::<AtomicBool>();
+        // SAFETY:
+        //
+        // This function is only called by `initalize_and_validate_arch_capability_support` and it
+        // provides a valid [`AtomicBool`] pointer.
+        let arg = unsafe { &*arg };
+
+        arg.fetch_and(validate_arch_capabilities_match(), Ordering::Relaxed);
+    }
+
+    // SAFETY:
+    //
+    // `arch::initialize_arch_capability_support()` was called before any architecture-dependent actions
+    // occurred.
+    unsafe { initialize_arch_capability_support() }
+
+    let all_same_config = AtomicBool::new(true);
+    // SAFETY:
+    //
+    // A valid function was passed and the argument is a valid pointer in regards to the passed
+    // function.
+    unsafe {
+        (generic_table.run_on_all_processors)(
+            validate_same_arch_capability_support,
+            ptr::from_ref(&all_same_config).cast_mut().cast::<()>(),
+        )
+    };
+    if !all_same_config.load(Ordering::Relaxed) {
+        early_error!("Mismatched ArchConfig");
+        return false;
+    }
+
+    true
 }

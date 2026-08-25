@@ -18,6 +18,15 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
 
     subproject.add_libraries("conversion");
     subproject.add_libraries("stub-api");
+    subproject.add_libraries("sync");
+
+    if config.kconfig.contains_key("CONFIG_STUB_ARCH_AARCH64") {
+        subproject.add_libraries("aarch64");
+    } else if config.kconfig.contains_key("CONFIG_STUB_ARCH_I686")
+        || config.kconfig.contains_key("CONFIG_STUB_ARCH_X86_64")
+    {
+        subproject.add_libraries("x86");
+    }
 
     subprojects.push(subproject);
 }

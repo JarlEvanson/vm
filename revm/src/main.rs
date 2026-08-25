@@ -4,6 +4,7 @@
 #![no_std]
 #![no_main]
 
+mod arch;
 mod log;
 mod stub_protocol;
 mod util;
