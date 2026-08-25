@@ -4,6 +4,7 @@
 #![no_std]
 #![no_main]
 
+mod log;
 mod stub_protocol;
 
 /// Generic handler for panics.
