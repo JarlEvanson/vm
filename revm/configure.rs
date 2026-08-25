@@ -16,5 +16,7 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     subproject.disable_host();
     subproject.disable_revm_stub();
 
+    subproject.add_libraries("stub-api");
+
     subprojects.push(subproject);
 }
