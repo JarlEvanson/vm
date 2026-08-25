@@ -6,6 +6,7 @@
 
 mod arch;
 mod log;
+mod memory;
 mod stub_protocol;
 mod util;
 
