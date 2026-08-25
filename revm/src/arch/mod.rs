@@ -19,3 +19,8 @@ use x86 as arch;
 use x86_64 as arch;
 
 pub mod interface;
+
+/// Architecture-dependent memory management code.
+pub mod memory {
+    pub use super::arch::memory::compute_page_frame_size;
+}
