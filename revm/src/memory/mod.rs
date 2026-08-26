@@ -5,6 +5,7 @@ use sync::ControlledModificationCell;
 use crate::arch;
 
 pub mod phys;
+pub mod virt;
 
 /// The size, in bytes, of a base page and frame.
 static PAGE_FRAME_SIZE: ControlledModificationCell<usize> = ControlledModificationCell::new(0);
