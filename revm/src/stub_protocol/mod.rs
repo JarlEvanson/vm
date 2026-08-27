@@ -20,6 +20,7 @@ use crate::{
         arch_capability_support, initialize_arch_capability_support,
         validate_arch_capabilities_match,
     },
+    drivers::{DriverInitializationError, probe_drivers},
     memory::initialize_memory_management,
 };
 
@@ -61,6 +62,20 @@ extern "C" fn revm_entry(header_ptr: *mut HeaderV0) -> Status {
     //
     // This function is called before any memory management functionality has been utilized.
     unsafe { initialize_memory_management() }
+
+    for arg in command_line.split_whitespace() {
+        let Some(name_options) = arg.strip_prefix("console=") else {
+            continue;
+        };
+
+        let (name, options) = name_options.split_once(",").unwrap_or((name_options, ""));
+        if let Err(error) = probe_drivers(name, options) {
+            early_error!("error initializing requested console: {error}");
+            match error {
+                DriverInitializationError::NotFound => return Status::NOT_FOUND,
+            }
+        }
+    }
 
     PROTOCOL_TABLE.store(ptr::null_mut(), Ordering::Release);
 
