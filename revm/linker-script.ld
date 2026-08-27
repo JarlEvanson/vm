@@ -24,6 +24,12 @@ SECTIONS {
         *(.rodata .rodata.*)
     } :rodata
 
+    .drivers : {
+        _drivers_start = .;
+        *(.drivers .drivers.*)
+        _drivers_end = .;
+    } :rodata
+
     .dynamic : {
         *(.dynamic .dynamic.*)
     } :dyn :rodata

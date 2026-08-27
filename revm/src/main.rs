@@ -5,6 +5,7 @@
 #![no_main]
 
 mod arch;
+mod drivers;
 mod log;
 mod memory;
 mod stub_protocol;

@@ -80,4 +80,6 @@ endchoice
 
 endmenu
 
+source revm/src/drivers/Kconfig
+
 endmenu
