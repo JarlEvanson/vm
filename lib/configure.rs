@@ -3,12 +3,12 @@ use crate::config::{Config, Subproject};
 #[path = "compiler-builtins/configure.rs"]
 mod compiler_builtins;
 
-pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
-    core_configure(config, subprojects);
-    compiler_builtins::configure(config, subprojects);
+pub fn configure(config: &mut Config) {
+    core_configure(config);
+    compiler_builtins::configure(config);
 }
 
-fn core_configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
+fn core_configure(config: &mut Config) {
     let mut root_module = config.rustc_sysroot.join("lib");
     root_module.push("rustlib");
     root_module.push("src");
@@ -23,5 +23,5 @@ fn core_configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     subproject.disable_host();
     subproject.set_external();
 
-    subprojects.push(subproject);
+    config.subprojects.push(subproject);
 }

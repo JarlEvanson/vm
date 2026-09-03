@@ -1,6 +1,6 @@
 use crate::config::{Config, Subproject};
 
-pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
+pub fn configure(config: &mut Config) {
     let mut root_module = config.arguments.source_dir.join("lib");
     root_module.push("compiler-builtins");
     root_module.push("src");
@@ -10,5 +10,5 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     subproject.disable_build();
     subproject.disable_host();
 
-    subprojects.push(subproject);
+    config.subprojects.push(subproject);
 }

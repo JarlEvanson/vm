@@ -1,6 +1,6 @@
 use crate::config::{Config, Subproject};
 
-pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
+pub fn configure(config: &mut Config) {
     let mut root_module = config.arguments.source_dir.join("tools");
     root_module.push("configure");
     root_module.push("src");
@@ -12,5 +12,5 @@ pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
     subproject.disable_revm();
     subproject.disable_revm_stub();
 
-    subprojects.push(subproject);
+    config.subprojects.push(subproject);
 }

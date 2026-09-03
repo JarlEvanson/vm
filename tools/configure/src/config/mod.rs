@@ -52,7 +52,6 @@ pub fn load() -> Result<LoadConfigAction, LoadConfigError> {
     let revm_opts = compiler_options::locate(&kconfig, "REVM");
     let revm_stub_opts = compiler_options::locate(&kconfig, "STUB");
 
-    let mut subprojects = Vec::new();
     let mut config = Config {
         arguments,
         rustc_sysroot,
@@ -71,6 +70,8 @@ pub fn load() -> Result<LoadConfigAction, LoadConfigError> {
         revm_cfgs: Vec::new(),
         revm_stub_cfgs: Vec::new(),
 
+        subprojects: Vec::new(),
+
         graph: HashMap::new(),
         subproject_info: Vec::new(),
     };
@@ -80,21 +81,21 @@ pub fn load() -> Result<LoadConfigAction, LoadConfigError> {
     config.revm_cfgs = acquire_cfgs(&config, Target::Revm)?;
     config.revm_stub_cfgs = acquire_cfgs(&config, Target::RevmStub)?;
 
-    configure_lib::configure(&mut config, &mut subprojects);
-    configure_revm::configure(&mut config, &mut subprojects);
-    configure_stub::configure(&mut config, &mut subprojects);
-    configure_tools::configure(&mut config, &mut subprojects);
+    configure_lib::configure(&mut config);
+    configure_revm::configure(&mut config);
+    configure_stub::configure(&mut config);
+    configure_tools::configure(&mut config);
 
     let mut subproject_info = Vec::new();
-    for subproject in subprojects {
+    for (index, subproject) in config.subprojects.iter().enumerate() {
         if subproject.build {
-            let info = generate_subproject_info(&subproject, Target::Build, iter::empty());
+            let info = generate_subproject_info(index, Target::Build, iter::empty());
 
             subproject_info.push(info);
         }
 
         if subproject.host {
-            let info = generate_subproject_info(&subproject, Target::Host, iter::empty());
+            let info = generate_subproject_info(index, Target::Host, iter::empty());
 
             subproject_info.push(info);
         }
@@ -115,13 +116,13 @@ pub fn load() -> Result<LoadConfigAction, LoadConfigError> {
         let extra_deps = core_iter.into_iter().chain(compiler_builtins_iter);
 
         if subproject.revm {
-            let info = generate_subproject_info(&subproject, Target::Revm, extra_deps.clone());
+            let info = generate_subproject_info(index, Target::Revm, extra_deps.clone());
 
             subproject_info.push(info);
         }
 
         if subproject.revm_stub {
-            let info = generate_subproject_info(&subproject, Target::RevmStub, extra_deps);
+            let info = generate_subproject_info(index, Target::RevmStub, extra_deps);
 
             subproject_info.push(info);
         }
@@ -132,12 +133,17 @@ pub fn load() -> Result<LoadConfigAction, LoadConfigError> {
             return a.target.cmp(&b.target);
         }
 
-        a.name.cmp(&b.name)
+        config.subprojects[a.index]
+            .name
+            .cmp(&config.subprojects[b.index].name)
     });
 
     let mut graph = HashMap::new();
     for (index, info) in subproject_info.iter_mut().enumerate() {
-        graph.insert((info.name.clone(), info.target), index);
+        graph.insert(
+            (config.subprojects[info.index].name.clone(), info.target),
+            index,
+        );
     }
 
     config.graph = graph;
@@ -253,32 +259,16 @@ fn acquire_cfgs(config: &Config, target: Target) -> Result<Vec<String>, LoadConf
 }
 
 fn generate_subproject_info<'a, I: Iterator<Item = &'a str>>(
-    subproject: &'a Subproject,
+    index: usize,
     target: Target,
     extra_deps: I,
 ) -> SubprojectInfo {
     SubprojectInfo {
-        name: subproject.name.clone(),
-        root_module: subproject.root_module.clone(),
-        libraries: subproject
-            .libraries
-            .iter()
-            .map(|s| s.as_str())
-            .chain(extra_deps)
-            .map(String::from)
-            .collect::<Vec<_>>(),
-        kind: if subproject.binary {
-            if subproject.tool {
-                Kind::Tool
-            } else {
-                Kind::Binary
-            }
-        } else {
-            Kind::Library
-        },
+        index,
+
+        extra_libraries: extra_deps.map(String::from).collect::<Vec<_>>(),
+
         target,
-        linker_script: subproject.linker_script.clone(),
-        is_workspace_member: subproject.is_workspace_member,
     }
 }
 
@@ -301,30 +291,28 @@ pub struct Config {
     pub revm_cfgs: Vec<String>,
     pub revm_stub_cfgs: Vec<String>,
 
+    pub subprojects: Vec<Subproject>,
+
     pub graph: HashMap<(String, Target), usize>,
     pub subproject_info: Vec<SubprojectInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubprojectInfo {
-    pub name: String,
+    index: usize,
 
-    pub root_module: PathBuf,
-    pub libraries: Vec<String>,
+    pub extra_libraries: Vec<String>,
 
-    pub kind: Kind,
     pub target: Target,
-
-    pub linker_script: Option<PathBuf>,
-
-    pub is_workspace_member: bool,
 }
 
 impl SubprojectInfo {
-    pub fn artifact_name(&self) -> String {
-        match self.kind {
-            Kind::Binary | Kind::Tool => self.name.clone(),
-            Kind::Library => library_artifact_name(&self.name),
+    pub fn artifact_name(&self, config: &Config) -> String {
+        let subproject = &config.subprojects[self.index];
+
+        match subproject.kind {
+            Kind::Binary | Kind::Tool => subproject.name.clone(),
+            Kind::Library => library_artifact_name(&subproject.name),
         }
     }
 }
@@ -363,7 +351,7 @@ impl Target {
             Self::Build => "rustc_build",
             Self::Host => "rustc_host",
             Self::Revm => "rustc_revm",
-            Self::RevmStub => "rustc_revm_stub",
+            Self::RevmStub => "rustc_stub",
         }
     }
 
@@ -372,7 +360,7 @@ impl Target {
             Self::Build => "doc_build",
             Self::Host => "doc_host",
             Self::Revm => "doc_revm",
-            Self::RevmStub => "doc_revm_stub",
+            Self::RevmStub => "doc_stub",
         }
     }
 
@@ -387,23 +375,22 @@ impl Target {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct Subproject {
-    name: String,
+pub struct Subproject {
+    pub name: String,
 
-    root_module: PathBuf,
-    libraries: Vec<String>,
+    pub root_module: PathBuf,
+    pub libraries: Vec<String>,
 
-    linker_script: Option<PathBuf>,
+    pub linker_script: Option<PathBuf>,
 
-    binary: bool,
-    tool: bool,
+    pub kind: Kind,
 
     build: bool,
     host: bool,
     revm: bool,
     revm_stub: bool,
 
-    is_workspace_member: bool,
+    pub is_workspace_member: bool,
 }
 
 impl Subproject {
@@ -416,8 +403,7 @@ impl Subproject {
 
             linker_script: None,
 
-            binary: false,
-            tool: false,
+            kind: Kind::Library,
 
             build: true,
             host: true,
@@ -437,8 +423,11 @@ impl Subproject {
     }
 
     const fn set_binary(&mut self, tool: bool) {
-        self.binary = true;
-        self.tool = tool;
+        if tool {
+            self.kind = Kind::Tool;
+        } else {
+            self.kind = Kind::Binary;
+        }
     }
 
     const fn disable_build(&mut self) {

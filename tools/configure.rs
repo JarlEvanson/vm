@@ -1,8 +1,8 @@
-use crate::config::{Config, Subproject};
+use crate::config::Config;
 
 #[path = "configure/configure.rs"]
 mod configure;
 
-pub fn configure(config: &mut Config, subprojects: &mut Vec<Subproject>) {
-    configure::configure(config, subprojects);
+pub fn configure(config: &mut Config) {
+    configure::configure(config);
 }
