@@ -299,7 +299,7 @@ pub struct Config {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SubprojectInfo {
-    index: usize,
+    pub index: usize,
 
     pub extra_libraries: Vec<String>,
 

@@ -22,24 +22,27 @@ pub fn generate(output: &mut String, config: &Config) -> fmt::Result {
     for (index, subproject_info) in config.subproject_info.iter().enumerate() {
         writeln!(output, "\t\t{{")?;
 
-        let display_name = format!(
-            "{} ({})",
-            subproject_info.name,
-            subproject_info.target.folder()
-        );
+        let subproject = &config.subprojects[subproject_info.index];
+        let display_name = format!("{} ({})", subproject.name, subproject_info.target.folder());
         writeln!(output, "\t\t\t\"display_name\": {display_name:?},")?;
         writeln!(
             output,
             "\t\t\t\"root_module\": {:?},",
-            subproject_info.root_module
+            subproject.root_module
         )?;
         writeln!(output, "\t\t\t\"edition\": \"2024\",")?;
 
-        if subproject_info.libraries.is_empty() {
+        if subproject.libraries.is_empty() && subproject_info.extra_libraries.is_empty() {
             writeln!(output, "\t\t\t\"deps\": [],")?;
         } else {
             writeln!(output, "\t\t\t\"deps\": [")?;
-            for (index, dep) in subproject_info.libraries.iter().enumerate() {
+
+            let libraries = subproject
+                .libraries
+                .iter()
+                .chain(subproject_info.extra_libraries.iter());
+            let libraries_count = libraries.clone().count();
+            for (index, dep) in libraries.enumerate() {
                 writeln!(output, "\t\t\t\t{{")?;
 
                 writeln!(
@@ -50,7 +53,7 @@ pub fn generate(output: &mut String, config: &Config) -> fmt::Result {
                 let crate_index = config.graph[&(dep.clone(), subproject_info.target)];
                 writeln!(output, "\t\t\t\t\t\"crate\": {crate_index}")?;
 
-                if index == subproject_info.libraries.len() - 1 {
+                if index == libraries_count - 1 {
                     writeln!(output, "\t\t\t\t}}")?;
                 } else {
                     writeln!(output, "\t\t\t\t}},")?;
@@ -76,7 +79,7 @@ pub fn generate(output: &mut String, config: &Config) -> fmt::Result {
             }
         }
 
-        if subproject_info.name == "configure" {
+        if subproject.name == "configure" {
             writeln!(output, "\t\t\t],")?;
 
             writeln!(output, "\t\t\t\"source\": {{")?;
