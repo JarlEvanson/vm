@@ -128,7 +128,8 @@ impl<'a> Rule<'a> {
 pub struct Build<'a> {
     rule_name: Cow<'a, str>,
 
-    outputs: Vec<FilePath>,
+    explicit_outputs: Vec<FilePath>,
+    implicit_outputs: Vec<FilePath>,
 
     explicit: Vec<FilePath>,
     implicit: Vec<FilePath>,
@@ -145,7 +146,8 @@ impl<'a> Build<'a> {
         Self {
             rule_name,
 
-            outputs: Vec::new(),
+            explicit_outputs: Vec::new(),
+            implicit_outputs: Vec::new(),
 
             explicit: Vec::new(),
             implicit: Vec::new(),
@@ -155,14 +157,18 @@ impl<'a> Build<'a> {
     }
 
     pub fn add_output(&mut self, path: FilePath) {
-        self.outputs.push(path);
+        self.explicit_outputs.push(path);
     }
 
-    pub fn add_explicit(&mut self, path: FilePath) {
+    pub fn add_implicit_output(&mut self, path: FilePath) {
+        self.implicit_outputs.push(path)
+    }
+
+    pub fn add_input(&mut self, path: FilePath) {
         self.explicit.push(path)
     }
 
-    pub fn add_implicit(&mut self, path: FilePath) {
+    pub fn add_implicit_input(&mut self, path: FilePath) {
         self.implicit.push(path)
     }
 
@@ -171,13 +177,24 @@ impl<'a> Build<'a> {
     }
 
     pub fn write_out(&self, output: &mut Vec<u8>) {
-        assert!(!self.outputs.is_empty());
+        assert!(!self.explicit_outputs.is_empty());
 
         output.extend_from_slice("build".as_bytes());
 
-        for output_path in &self.outputs {
+        for output_path in &self.explicit_outputs {
             output.push(b' ');
             output_path.write_out(output);
+        }
+
+        if !self.implicit_outputs.is_empty() {
+            output.push(b' ');
+            output.push(b'|');
+            output.push(b' ');
+
+            for output_path in &self.implicit_outputs {
+                output.push(b' ');
+                output_path.write_out(output);
+            }
         }
 
         output.push(b':');

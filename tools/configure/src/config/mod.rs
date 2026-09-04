@@ -308,12 +308,7 @@ pub struct SubprojectInfo {
 
 impl SubprojectInfo {
     pub fn artifact_name(&self, config: &Config) -> String {
-        let subproject = &config.subprojects[self.index];
-
-        match subproject.kind {
-            Kind::Binary | Kind::Tool => subproject.name.clone(),
-            Kind::Library => library_artifact_name(&subproject.name),
-        }
+        config.subprojects[self.index].artifact_name()
     }
 }
 
@@ -448,6 +443,13 @@ impl Subproject {
 
     const fn set_external(&mut self) {
         self.is_workspace_member = false;
+    }
+
+    pub fn artifact_name(&self) -> String {
+        match self.kind {
+            Kind::Binary | Kind::Tool => self.name.clone(),
+            Kind::Library => library_artifact_name(&self.name),
+        }
     }
 }
 

@@ -7,6 +7,7 @@ use std::{
 use crate::config::{LoadConfigAction, cli};
 
 mod config;
+mod ninja;
 mod rust_project;
 
 fn main() -> ExitCode {
@@ -42,7 +43,19 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    ExitCode::SUCCESS
+    let mut ninja = Vec::new();
+    ninja::generate(&mut ninja, &config);
+
+    match std::fs::write(&config.arguments.ninja_path, &ninja) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!(
+                "error writing '{}': {error}",
+                config.arguments.ninja_path.display()
+            );
+            ExitCode::FAILURE
+        }
+    }
 }
 
 #[cfg(unix)]
