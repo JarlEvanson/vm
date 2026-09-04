@@ -1,5 +1,5 @@
 use crate::{
-    config::{Config, Target},
+    config::{Config, Kind, Target, library_artifact_name},
     convert_name_to_rust_name,
     ninja::utils::{Build, FilePath, NinjaFile, Rule, Variable},
     os_str_to_bytes,
@@ -25,7 +25,9 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     add_misc_rules(&mut file, config);
 
     add_format_builds(&mut file, config);
+    add_rustc_builds(&mut file, config);
     add_unit_test_builds(&mut file, config);
+    add_miri_unit_test_builds(&mut file, config);
     add_reconfigure_build(&mut file, config);
 
     let mut always = Build::new("phony");
@@ -296,9 +298,109 @@ fn add_format_builds(file: &mut NinjaFile, config: &Config) {
     file.add_build(format);
 }
 
+fn add_rustc_builds(file: &mut NinjaFile, config: &Config) {
+    let mut tools = Build::new("phony");
+    tools.add_output(FilePath::from_literal("tools"));
+
+    let tools_dir = config.arguments.out_dir.join("tools");
+    for subproject_info in &config.subproject_info {
+        let mut build = Build::new(subproject_info.target.rustc_rule());
+
+        let subproject = &config.subprojects[subproject_info.index];
+        let mut artifacts_path = config
+            .arguments
+            .build_dir
+            .join(subproject_info.target.folder());
+        artifacts_path.push("rustc");
+
+        let artifact_path = artifacts_path.join(subproject_info.artifact_name(config));
+        build.add_output(FilePath::from_path(&artifact_path));
+        build.add_input(FilePath::from_path(&subproject.root_module));
+
+        let mut driver_var = Variable::new("driver");
+        driver_var.push_literal("$");
+        driver_var.push_literal("rustc");
+        build.add_variable(driver_var);
+
+        let mut crate_name = Variable::new("crate_name");
+        crate_name.push_escaped(convert_name_to_rust_name(&subproject.name));
+        build.add_variable(crate_name);
+
+        let mut crate_type = Variable::new("crate_type");
+        crate_type.push_escaped(subproject.kind.crate_type());
+        build.add_variable(crate_type);
+
+        let mut extern_var = Variable::new("extern");
+        for dep in subproject
+            .libraries
+            .iter()
+            .chain(subproject_info.extra_libraries.iter())
+        {
+            let dep_artifact_path = artifacts_path.join(library_artifact_name(dep));
+
+            extern_var.push_literal(" --extern '");
+            extern_var.push_literal(convert_name_to_rust_name(dep));
+            extern_var.push_literal("=");
+            extern_var.push_command_escaped_path(&dep_artifact_path);
+            extern_var.push_literal("'");
+
+            build.add_implicit_input(FilePath::from_path(dep_artifact_path));
+        }
+
+        if !subproject.libraries.is_empty() {
+            build.add_variable(extern_var);
+        }
+
+        let mut extra_args = Variable::new("extra_args");
+        if let Some(linker_script) = subproject.linker_script.as_ref() {
+            extra_args.push_literal("-C link-arg=-T");
+            extra_args.push_command_escaped_path(linker_script);
+        }
+
+        build.add_variable(extra_args);
+
+        let mut search_dir = Variable::new("search_dir");
+        search_dir.push_command_escaped_path(artifacts_path);
+        build.add_variable(search_dir);
+
+        let mut in_file = Variable::new("in_file");
+        in_file.push_command_escaped_path(&subproject.root_module);
+        build.add_variable(in_file);
+
+        let mut out_file = Variable::new("out_file");
+        out_file.push_command_escaped_path(&artifact_path);
+        build.add_variable(out_file);
+
+        file.add_build(build);
+
+        if matches!(subproject.kind, Kind::Tool) && matches!(subproject_info.target, Target::Host) {
+            let mut copy = Build::new("copy");
+
+            let in_file_path = artifact_path;
+            let out_file_path = tools_dir.join(&subproject.name);
+
+            copy.add_input(FilePath::from_path(&in_file_path));
+            copy.add_output(FilePath::from_path(&out_file_path));
+
+            let mut in_file = Variable::new("in_file");
+            in_file.push_command_escaped_path(in_file_path);
+            copy.add_variable(in_file);
+
+            let mut out_file = Variable::new("out_file");
+            out_file.push_command_escaped_path(&out_file_path);
+            copy.add_variable(out_file);
+
+            tools.add_input(FilePath::from_path(&out_file_path));
+            file.add_build(copy);
+        }
+    }
+
+    file.add_build(tools);
+}
+
 fn add_unit_test_builds(file: &mut NinjaFile, config: &Config) {
     let mut unit_test = Build::new("phony");
-    unit_test.add_output(FilePath::from_path("unit-test"));
+    unit_test.add_output(FilePath::from_literal("unit-test"));
 
     for subproject in &config.subprojects {
         if !subproject.is_workspace_member {
@@ -312,7 +414,7 @@ fn add_unit_test_builds(file: &mut NinjaFile, config: &Config) {
         let mut artifacts_path = config.arguments.build_dir.join(Target::Build.folder());
         artifacts_path.push("rustc");
 
-        let artifact_path = artifacts_path.join(format!("{}-test", subproject.name));
+        let artifact_path = artifacts_path.join(format!("{}-unit-test", subproject.name));
         build.add_output(FilePath::from_path(&artifact_path));
 
         let mut driver = Variable::new("driver");
@@ -348,7 +450,7 @@ fn add_unit_test_builds(file: &mut NinjaFile, config: &Config) {
         let mut execute = Build::new("execute");
         execute.add_input(FilePath::from_path(artifact_path));
 
-        let mut unit_test_path = FilePath::from_literal("execute-");
+        let mut unit_test_path = FilePath::from_literal("execute-unit-test-");
         unit_test_path.push_literal(&subproject.name);
         execute.add_output(unit_test_path.clone());
 
@@ -358,6 +460,61 @@ fn add_unit_test_builds(file: &mut NinjaFile, config: &Config) {
 
         unit_test.add_input(unit_test_path);
         file.add_build(execute);
+    }
+
+    file.add_build(unit_test);
+}
+
+fn add_miri_unit_test_builds(file: &mut NinjaFile, config: &Config) {
+    let mut unit_test = Build::new("phony");
+    unit_test.add_output(FilePath::from_path("miri-unit-test"));
+
+    for subproject in &config.subprojects {
+        if !subproject.is_workspace_member {
+            continue;
+        } else if subproject.name == "core" || subproject.name == "compiler-builtins" {
+            continue;
+        }
+
+        let mut build = Build::new(Target::Build.rustc_rule());
+
+        let mut artifacts_path = config.arguments.build_dir.join(Target::Build.folder());
+        artifacts_path.push("rustc");
+
+        let artifact_path = artifacts_path.join(format!("{}-miri-unit-test", subproject.name));
+        build.add_output(FilePath::from_path(&artifact_path));
+
+        let mut driver = Variable::new("driver");
+        driver.push_literal("$miri");
+        build.add_variable(driver);
+
+        let mut crate_name = Variable::new("crate_name");
+        crate_name.push_escaped(convert_name_to_rust_name(&subproject.name));
+        build.add_variable(crate_name);
+
+        let mut crate_type = Variable::new("crate_type");
+        crate_type.push_escaped(subproject.kind.crate_type());
+        build.add_variable(crate_type);
+
+        let mut extra_args = Variable::new("extra_args");
+        extra_args.push_literal("--test");
+        extra_args.push_literal(" -C opt-level=0");
+        build.add_variable(extra_args);
+
+        let mut search_dir = Variable::new("search_dir");
+        search_dir.push_command_escaped_path(artifacts_path);
+        build.add_variable(search_dir);
+
+        let mut in_file = Variable::new("in_file");
+        in_file.push_command_escaped_path(&subproject.root_module);
+        build.add_variable(in_file);
+
+        let mut out_file = Variable::new("out_file");
+        out_file.push_command_escaped_path(&artifact_path);
+        build.add_variable(out_file);
+
+        unit_test.add_input(FilePath::from_path(artifact_path));
+        file.add_build(build);
     }
 
     file.add_build(unit_test);
