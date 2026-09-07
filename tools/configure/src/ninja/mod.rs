@@ -30,6 +30,7 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     add_miri_builds(&mut file, config);
     add_unit_test_builds(&mut file, config);
     add_miri_unit_test_builds(&mut file, config);
+    add_package_build(&mut file, config);
     add_reconfigure_build(&mut file, config);
 
     let mut always = Build::new("phony");
@@ -37,6 +38,7 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     file.add_build(always);
 
     file.add_default(FilePath::from_literal("tools"));
+    file.add_default(FilePath::from_literal("package"));
 
     file.write_out(output);
 }
@@ -727,6 +729,48 @@ fn add_miri_unit_test_builds(file: &mut NinjaFile, config: &Config) {
     }
 
     file.add_build(miri_unit_test);
+}
+
+fn add_package_build(file: &mut NinjaFile, config: &Config) {
+    let mut build_package = Build::new("execute");
+
+    let mut packager_path = config.arguments.build_dir.join(Target::Build.folder());
+    packager_path.push("rustc");
+    packager_path.push("package");
+
+    let mut revm_path = config.arguments.build_dir.join(Target::Revm.folder());
+    revm_path.push("rustc");
+    revm_path.push("revm");
+
+    let mut revm_stub_path = config.arguments.build_dir.join(Target::RevmStub.folder());
+    revm_stub_path.push("rustc");
+    revm_stub_path.push("revm-stub");
+
+    let packaged_path = config.arguments.out_dir.join("revm");
+
+    build_package.add_input(FilePath::from_path(&packager_path));
+    build_package.add_input(FilePath::from_path(&revm_path));
+    build_package.add_input(FilePath::from_path(&revm_stub_path));
+    build_package.add_output(FilePath::from_path(&packaged_path));
+
+    let mut binary = Variable::new("binary");
+    binary.push_command_escaped_path(&packager_path);
+    build_package.add_variable(binary);
+
+    let mut args = Variable::new("args");
+    args.push_command_escaped_path(&revm_stub_path);
+    args.push_literal(" ");
+    args.push_command_escaped_path(&revm_path);
+    args.push_literal(" ");
+    args.push_command_escaped_path(&packaged_path);
+    build_package.add_variable(args);
+
+    file.add_build(build_package);
+
+    let mut package = Build::new("phony");
+    package.add_output(FilePath::from_literal("package"));
+    package.add_input(FilePath::from_path(&packaged_path));
+    file.add_build(package);
 }
 
 fn add_reconfigure_build(file: &mut NinjaFile, config: &Config) {
