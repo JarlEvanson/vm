@@ -1,6 +1,6 @@
-use std::{mem, process::ExitCode};
+use std::{ffi::CStr, mem, process::ExitCode};
 
-use conversion::{usize_to_u16_strict, usize_to_u32_strict};
+use conversion::{u32_to_usize, usize_to_u16_strict, usize_to_u32_strict, usize_to_u64};
 use elf::{
     class::class_any::AnyClass,
     encoding::AnyEndian,
@@ -58,7 +58,7 @@ fn main() -> ExitCode {
 
 fn generate_package(output: &mut Vec<u8>, stub: &[u8], revm: &[u8]) -> ExitCode {
     let mut package = Vec::new();
-    let pe_header_offset = 64u32;
+    let mut pe_header_offset = 64;
 
     let elf = match elf::Elf::<_, AnyClass, AnyEndian>::new(stub) {
         Ok(elf) => elf,
@@ -66,6 +66,120 @@ fn generate_package(output: &mut Vec<u8>, stub: &[u8], revm: &[u8]) -> ExitCode 
             eprintln!("error parsing revm-stub: {error}");
             return ExitCode::FAILURE;
         }
+    };
+
+    let linux_efi_header_found = 'linux_efi_header: {
+        let section_header_table = match elf.section_header_table() {
+            Ok(section_header_table) => {
+                if let Some(section_header_table) = section_header_table {
+                    section_header_table
+                } else {
+                    eprintln!("error locating section header table: not included");
+                    eprintln!("skipping search for '.linux-efi-header'");
+                    break 'linux_efi_header false;
+                }
+            }
+            Err(error) => {
+                eprintln!("error locating section header table: {error}");
+                eprintln!("skipping search for '.linux-efi-header'");
+                return ExitCode::FAILURE;
+            }
+        };
+
+        let section_header_string_table_index = match elf
+            .header()
+            .section_header_string_table_index()
+        {
+            Ok(section_header_string_table_index) => u64::from(section_header_string_table_index),
+            Err(error) => {
+                eprintln!("error locating section header string table index: {error}");
+                eprintln!("skipping search for '.linux-efi-header'");
+                break 'linux_efi_header false;
+            }
+        };
+
+        let Some(section_header_string_table_header) =
+            section_header_table.get(section_header_string_table_index)
+        else {
+            eprintln!("error accessing section header string table header: invalid index");
+            eprintln!("skipping search for '.linux-efi-header'");
+            break 'linux_efi_header false;
+        };
+
+        let section_header_string_table = match section_header_string_table_header.section() {
+            Ok(section_header_string_table) => section_header_string_table,
+            Err(error) => {
+                eprintln!("error accessing section header string table: {error}");
+                eprintln!("skipping search for '.linux-efi-header'");
+                break 'linux_efi_header false;
+            }
+        };
+
+        let mut linux_efi_header = None;
+        for (index, section_header) in section_header_table.into_iter().enumerate() {
+            let name_offset = match section_header.name_offset() {
+                Ok(name_offset) => u32_to_usize(name_offset),
+                Err(error) => {
+                    eprintln!("error accessing name offset of section {index}: {error}");
+                    eprintln!("skipping section {index}");
+                    continue;
+                }
+            };
+
+            let Some(name_bytes) = section_header_string_table.get(name_offset..) else {
+                eprintln!("error accessing name of section {index}: out of bounds name location");
+                eprintln!("skipping section {index}");
+                continue;
+            };
+
+            let name = match CStr::from_bytes_until_nul(name_bytes) {
+                Ok(name) => name,
+                Err(error) => {
+                    eprintln!("error accessing name of section {index}: {error}");
+                    eprintln!("skipping section {index}");
+                    continue;
+                }
+            };
+
+            if name == c".linux-efi-header" {
+                match section_header.section() {
+                    Ok(section) => {
+                        linux_efi_header = Some(section);
+                        break;
+                    }
+                    Err(error) => {
+                        eprintln!("error accessing '.linux-efi-header': {error}");
+                        eprintln!("aborting due to malformed ELF file");
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+        }
+
+        let Some(linux_efi_header) = linux_efi_header else {
+            break 'linux_efi_header false;
+        };
+
+        match u32::try_from(linux_efi_header.len()) {
+            Ok(linux_efi_header_length) => pe_header_offset = linux_efi_header_length,
+            Err(error) => {
+                eprintln!("aborting since '.linux-efi-header' is too large to package: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+
+        match pe_header_offset.checked_next_multiple_of(8) {
+            Some(new_pe_header_offset) => pe_header_offset = new_pe_header_offset,
+            None => {
+                eprintln!(
+                    "aborting since '.linux-efi-header' is too large to package: length overflow"
+                );
+                return ExitCode::FAILURE;
+            }
+        }
+
+        package.write_bytes(0, linux_efi_header);
+        true
     };
 
     let program_header_table = match elf.program_header_table() {
@@ -546,6 +660,45 @@ fn generate_package(output: &mut Vec<u8>, stub: &[u8], revm: &[u8]) -> ExitCode 
     // implementations).
     package.write_bytes(0, b"MZ");
     package.write_u32(60, pe_header_offset);
+
+    if linux_efi_header_found {
+        // 64 KiB stack can completely overlap with the package.
+        let required_free_region_size = usize_to_u64(package.len()).max(64 * 1024);
+        let Some(required_free_region_size) =
+            required_free_region_size.checked_add(u64::from(image_size))
+        else {
+            eprintln!("aborting since required free region is too large");
+            return ExitCode::FAILURE;
+        };
+
+        match arch {
+            Arch::Aarch64 => {
+                let image_size_offset =
+                    usize_to_u64(mem::offset_of!(linux::aarch64::Header, image_size));
+                package.write_u64(image_size_offset, required_free_region_size);
+            }
+            Arch::I686 | Arch::X86_64 => {
+                let paragraphs_offset = usize_to_u64(
+                    linux::x86::Header::BASE_OFFSET + mem::offset_of!(linux::x86::Header, syssize),
+                );
+
+                let required_free_region_size = match u32::try_from(required_free_region_size) {
+                    Ok(paragraphs) => paragraphs,
+                    Err(error) => {
+                        eprintln!("aborting since required free region is too large: {error}");
+                        return ExitCode::FAILURE;
+                    }
+                };
+                package.write_u32(paragraphs_offset, required_free_region_size.div_ceil(16));
+
+                let init_size_offset = usize_to_u64(
+                    linux::x86::Header::BASE_OFFSET
+                        + mem::offset_of!(linux::x86::Header, init_size),
+                );
+                package.write_u32(init_size_offset, required_free_region_size);
+            }
+        }
+    }
 
     *output = package;
     ExitCode::SUCCESS
