@@ -16,5 +16,7 @@ pub fn configure(config: &mut Config) {
     subproject.disable_host();
     subproject.disable_revm();
 
+    subproject.add_libraries("sync");
+
     config.subprojects.push(subproject);
 }

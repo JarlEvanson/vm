@@ -45,6 +45,10 @@ SECTIONS {
     . = ALIGN(CONSTANT(COMMONPAGESIZE));
     .data : {
         *(.data .data.*)
+
+        graph_nodes_start = .;
+        *(.graph_node .graph_node.*)
+        graph_nodes_end = .;
     } :data
 
     .bss : {
