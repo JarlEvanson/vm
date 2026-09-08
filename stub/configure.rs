@@ -19,6 +19,14 @@ pub fn configure(config: &mut Config) {
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         subproject.add_libraries("uefi");
     }
+    if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_LINUX") {
+        subproject.add_libraries("linux");
+        subproject.add_libraries("pe");
+    }
+
+    if config.kconfig.contains_key("CONFIG_STUB_DEVICE_TREE") {
+        subproject.add_libraries("device-tree");
+    }
 
     if !config.kconfig.contains_key("CONFIG_STUB_PLATFORMS_VALID") {
         eprintln!("=========================================================");
