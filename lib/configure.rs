@@ -2,6 +2,8 @@ use crate::config::{Config, Subproject};
 
 #[path = "compiler-builtins/configure.rs"]
 mod compiler_builtins;
+#[path = "firmware/configure.rs"]
+mod firmware;
 #[path = "format/configure.rs"]
 mod format;
 #[path = "misc/configure.rs"]
@@ -13,6 +15,7 @@ pub fn configure(config: &mut Config) {
     core_configure(config);
 
     compiler_builtins::configure(config);
+    firmware::configure(config);
     format::configure(config);
     misc::configure(config);
     platform::configure(config);
