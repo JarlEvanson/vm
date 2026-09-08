@@ -1,9 +1,9 @@
-ENTRY(main)
+ENTRY(entry_point)
 
 PHDRS {
     code PT_LOAD        FLAGS (0x4 | 0x1);
     rodata PT_LOAD      FLAGS (0x4      );
-    relro PT_LOAD  FLAGS (0x4 | 0x2);
+    relro PT_LOAD       FLAGS (0x4 | 0x2);
     data PT_LOAD        FLAGS (0x4 | 0x2);
     blob PT_LOAD        FLAGS (0x4 | 0x2);
     dyn PT_DYNAMIC      FLAGS (0x4      );
