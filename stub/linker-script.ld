@@ -15,6 +15,10 @@ SECTIONS {
 
     relocate_offset = relocate - _image_start;
     dynamic_offset = _DYNAMIC - _image_start;
+    
+    .linux-efi-header : {
+        KEEP(*(.linux-efi-header .linux-efi-header.*))
+    } :NONE
 
     . = ALIGN(CONSTANT(COMMONPAGESIZE));
     .text : {
