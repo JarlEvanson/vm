@@ -168,6 +168,13 @@ impl LogBuffer {
         logbuffer
     }
 
+    /// Returns the [`Message`] associated with the provided `seqeuence`, or if said message is
+    /// gone, the next available [`Message`].
+    ///
+    /// On success, the user must check [`Message::sequence`] to see which [`Message`] was actually
+    /// returned.
+    ///
+    /// This returns [`None`] if the requested `sequence` is not yet available.
     pub fn read<'buffer>(
         &self,
         sequence: usize,
@@ -197,7 +204,7 @@ impl LogBuffer {
                 atomic::fence(Ordering::Acquire);
 
                 let middle_state_id = descriptor.state_id.load(Ordering::Relaxed);
-                if start_state_id != middle_state_id {
+                if start_state_id != middle_state_id || logical_tail == FAILED_LOGICAL_POS {
                     break (middle_state_id, logical_tail == FAILED_LOGICAL_POS);
                 }
 
@@ -236,7 +243,7 @@ impl LogBuffer {
 
                 let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
                 if start_state_id != end_state_id {
-                    break (end_state_id, logical_tail == FAILED_LOGICAL_POS);
+                    break (end_state_id, false);
                 }
 
                 let message = Message {
@@ -247,7 +254,7 @@ impl LogBuffer {
                 return Some(message);
             };
 
-            let tail_sequence = self.tail_sequence();
+            let tail_sequence = self.tail_sequence_internal();
             if sequence < tail_sequence {
                 sequence = tail_sequence;
             } else if state_id
@@ -263,7 +270,7 @@ impl LogBuffer {
             }
         }
     }
-
+    /// Returns the sequence number associated with the tail [`Message`].
     pub fn tail_sequence(&self) -> usize {
         let Some(message) = self.read(self.tail_sequence_internal(), &mut []) else {
             todo!()
@@ -276,6 +283,7 @@ impl LogBuffer {
         self.initial_sequence
     }
 
+    /// Returns the sequence number associated with the tail [`DescriptorId`].
     fn tail_sequence_internal(&self) -> usize {
         loop {
             let id_tail = self.id_tail.load(Ordering::Acquire);
