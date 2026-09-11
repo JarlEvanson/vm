@@ -272,7 +272,11 @@ impl LogBuffer {
         message.sequence
     }
 
-    pub fn tail_sequence_internal(&self) -> usize {
+    pub const fn initial_sequence(&self) -> usize {
+        self.initial_sequence
+    }
+
+    fn tail_sequence_internal(&self) -> usize {
         loop {
             let id_tail = self.id_tail.load(Ordering::Acquire);
 
@@ -298,10 +302,6 @@ impl LogBuffer {
 
             core::hint::spin_loop();
         }
-    }
-
-    pub const fn initial_sequence(&self) -> usize {
-        self.initial_sequence
     }
 
     /// Returns `true` if the size of the data is supported.
