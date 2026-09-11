@@ -8,6 +8,14 @@ use core::{
 
 pub mod allocated;
 
+const EMPTY_LOGICAL_POS: usize = 0x1;
+const FAILED_LOGICAL_POS: usize = 0x3;
+
+const _: () = assert!(!EMPTY_LOGICAL_POS.is_multiple_of(mem::size_of_val(&EMPTY_LOGICAL_POS)));
+const _: () = assert!(!EMPTY_LOGICAL_POS.is_multiple_of(mem::align_of_val(&EMPTY_LOGICAL_POS)));
+const _: () = assert!(!FAILED_LOGICAL_POS.is_multiple_of(mem::size_of_val(&FAILED_LOGICAL_POS)));
+const _: () = assert!(!FAILED_LOGICAL_POS.is_multiple_of(mem::align_of_val(&FAILED_LOGICAL_POS)));
+
 pub struct LogBuffer {
     data_ptr: NonNull<AtomicU8>,
     data_capacity: usize,
@@ -85,7 +93,9 @@ impl LogBuffer {
         while index < descriptor_capacity {
             let descriptor = &mut descriptors[index];
 
-            let sequence = initial_sequence.wrapping_add(index).wrapping_sub(descriptor_capacity);
+            let sequence = initial_sequence
+                .wrapping_add(index)
+                .wrapping_sub(descriptor_capacity);
             descriptor.write(Descriptor {
                 state_id: AtomicDescriptorStateId::new(DescriptorStateId::new(
                     DescriptorId::new_from_seq(sequence),
@@ -131,7 +141,10 @@ impl LogBuffer {
             sequence: AtomicUsize::new(initial_sequence),
         };
 
-        logbuffer.logical_head = AtomicUsize::new(logical_head);
+        logbuffer.logical_head = AtomicUsize::new(logbuffer.compute_logical_head(
+            logical_tail,
+            LogBuffer::compute_data_block_size_padded(starter_message.len()),
+        ));
         logbuffer.id_head = AtomicDescriptorId::new(id_head.next());
 
         let id_data = logbuffer.data_at_pos_mut(logical_tail);
@@ -162,7 +175,7 @@ impl LogBuffer {
     ) -> Option<Message<'buffer>> {
         let mut sequence = sequence;
         loop {
-            let state_id = loop {
+            let (state_id, data_lost) = loop {
                 let expected_id = DescriptorId::new_from_seq(sequence);
 
                 let descriptor = self.descriptor(expected_id);
@@ -170,12 +183,12 @@ impl LogBuffer {
                 let start_state_id = descriptor.state_id.load(Ordering::Acquire);
                 if start_state_id != DescriptorStateId::new(expected_id, DescriptorState::Finalized)
                 {
-                    break start_state_id;
+                    break (start_state_id, false);
                 }
 
                 let loaded_sequence = descriptor.sequence.load(Ordering::Relaxed);
                 if loaded_sequence != sequence {
-                    break start_state_id;
+                    break (start_state_id, false);
                 }
 
                 let logical_head = descriptor.logical_head.load(Ordering::Relaxed);
@@ -185,7 +198,16 @@ impl LogBuffer {
 
                 let middle_state_id = descriptor.state_id.load(Ordering::Relaxed);
                 if start_state_id != middle_state_id {
-                    break middle_state_id;
+                    break (middle_state_id, logical_tail == FAILED_LOGICAL_POS);
+                }
+
+                if logical_tail == EMPTY_LOGICAL_POS {
+                    let message = Message {
+                        sequence,
+                        buffer: &mut [],
+                    };
+
+                    return Some(message);
                 }
 
                 let (block_pos, mut data_size) =
@@ -211,7 +233,7 @@ impl LogBuffer {
 
                 let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
                 if start_state_id != end_state_id {
-                    break end_state_id;
+                    break (end_state_id, logical_tail == FAILED_LOGICAL_POS);
                 }
 
                 let message = Message {
@@ -230,6 +252,7 @@ impl LogBuffer {
                     DescriptorId::new_from_seq(sequence),
                     DescriptorState::MissingData,
                 )
+                || data_lost
             {
                 sequence = sequence.wrapping_add(1);
             } else {
@@ -251,9 +274,7 @@ impl LogBuffer {
             atomic::fence(Ordering::Acquire);
 
             let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
-            if start_state_id != end_state_id
-                || start_state_id.id() != id_tail
-            {
+            if start_state_id != end_state_id || start_state_id.id() != id_tail {
                 continue;
             }
 
@@ -272,17 +293,25 @@ impl LogBuffer {
 
     /// Returns `true` if the size of the data is supported.
     const fn check_data_block_size(&self, data_size: usize) -> bool {
-        Self::compute_data_block_size(data_size) <= self.data_capacity / 2
+        Self::compute_data_block_size_padded(data_size) <= self.data_capacity / 2
     }
 
     /// Computes the size of the data block given the size of the data.
     const fn compute_data_block_size(size: usize) -> usize {
-        let required_size = size.strict_add(mem::size_of::<DescriptorId>());
-        required_size
+        size.strict_add(mem::size_of::<DescriptorId>())
+    }
+
+    /// Computes the size of the data block and its padding given the size of the data.
+    const fn compute_data_block_size_padded(size: usize) -> usize {
+        Self::compute_data_block_size(size)
             .checked_next_multiple_of(mem::align_of::<DescriptorId>())
             .expect("padding data block size failed")
     }
 
+    /// Returns the `logical_head` associated with the provided `logical_tail` and size.
+    ///
+    /// This can be used with the results of [`Self::compute_data_block_size()`] and
+    /// [`Self::compute_data_block_size_padded()`].
     const fn compute_logical_head(&self, logical_tail: usize, size: usize) -> usize {
         let logical_head = logical_tail.wrapping_add(size);
 
@@ -321,11 +350,6 @@ impl LogBuffer {
 
     const fn descriptor(&self, id: DescriptorId) -> &Descriptor {
         let index = id.to_index(self.descriptor_capacity);
-        &self.descriptors()[index]
-    }
-
-    const fn descriptor_from_seq(&self, seq: usize) -> &Descriptor {
-        let index = DescriptorId::new_from_seq(seq).to_index(self.descriptor_capacity);
         &self.descriptors()[index]
     }
 
