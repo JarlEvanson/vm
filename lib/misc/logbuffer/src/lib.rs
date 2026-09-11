@@ -270,6 +270,12 @@ impl LogBuffer {
             }
         }
     }
+
+    /// Reserves at least `size` bytes in this [`LogBuffer`].
+    pub fn reserve(&self, size: usize) -> Option<ReservedMessage<'_>> {
+        todo!()
+    }
+
     /// Returns the sequence number associated with the tail [`Message`].
     pub fn tail_sequence(&self) -> usize {
         let Some(message) = self.read(self.tail_sequence_internal(), &mut []) else {
@@ -441,6 +447,55 @@ pub struct Message<'buffer> {
     pub sequence: usize,
     /// Extracted portion of the data buffer associated with this [`Message`].
     pub buffer: &'buffer mut [u8],
+}
+
+/// A reserved segment of the [`Ringbuffer`].
+pub struct ReservedMessage<'buffer> {
+    ringbuffer: &'buffer LogBuffer,
+    sequence: usize,
+    buffer: &'buffer [AtomicU8],
+}
+
+impl<'buffer> ReservedMessage<'buffer> {
+    /// Returns the sequence of the [`ReservedMessage`].
+    pub fn sequence(&self) -> usize {
+        self.sequence
+    }
+
+    /// Returns the [`ReservedMessage`] buffer.
+    pub fn buffer(&self) -> &[AtomicU8] {
+        self.buffer
+    }
+
+    /// Commits the [`ReservedMessage`] into the associated [`LogBuffer`].
+    pub fn commit(self) -> CommittedMessage<'buffer> {
+        todo!()
+    }
+
+    /// Finalizes the [`ReservedMessage`], thereby closing the editing window.
+    pub fn finalize(self) {
+        todo!()
+    }
+}
+
+/// A committed [`Message`].
+///
+/// The associated [`Message`] might be able to be reopened for editing.
+pub struct CommittedMessage<'buffer> {
+    ringbuffer: &'buffer LogBuffer,
+    sequence: usize,
+}
+
+impl<'buffer> CommittedMessage<'buffer> {
+    /// Returns the sequence of the [`ReservedMessage`].
+    pub fn sequence(&self) -> usize {
+        self.sequence
+    }
+
+    /// Attempts to reopen the [`CommittedMessage`] for additional manipulation.
+    pub fn reopen(self, additional_size: usize) -> Result<ReservedMessage<'buffer>, Self> {
+        todo!()
+    }
 }
 
 /// Internal data associated with a particular message.
