@@ -625,13 +625,14 @@ mod test {
     fn initial_read() {
         let logbuffer = AllocatedLogBuffer::new(128 * 1024, 1024, "TEST");
 
-        let mut sequence = logbuffer.initial_sequence();
+        let mut sequence = logbuffer.tail_sequence();
         let mut buffer = [0; 4096];
 
         let mut processed_messages = 0;
         while let Some(message) = logbuffer.read(sequence, &mut buffer) {
             sequence = message.sequence + 1;
             processed_messages += 1;
+            assert_eq!(processed_messages, 1);
         }
 
         assert_eq!(processed_messages, 1);
