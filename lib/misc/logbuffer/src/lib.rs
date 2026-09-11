@@ -265,6 +265,14 @@ impl LogBuffer {
     }
 
     pub fn tail_sequence(&self) -> usize {
+        let Some(message) = self.read(self.tail_sequence_internal(), &mut []) else {
+            todo!()
+        };
+
+        message.sequence
+    }
+
+    pub fn tail_sequence_internal(&self) -> usize {
         loop {
             let id_tail = self.id_tail.load(Ordering::Acquire);
 
