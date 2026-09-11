@@ -14,6 +14,18 @@ mod platform;
 pub fn configure(config: &mut Config) {
     core_configure(config);
 
+    let mut root_module = config.arguments.source_dir.join("lib");
+    root_module.push("test");
+    root_module.push("src");
+    root_module.push("main.rs");
+
+    let mut subproject = Subproject::new("test", root_module);
+    subproject.set_binary(true);
+
+    subproject.add_libraries("logbuffer");
+
+    config.subprojects.push(subproject);
+
     compiler_builtins::configure(config);
     firmware::configure(config);
     format::configure(config);

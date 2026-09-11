@@ -1,11 +1,12 @@
-#![cfg_attr(not(test), no_std)]
-
 use core::{
-    mem,
+    fmt,
+    mem::{self, MaybeUninit},
     ptr::{self, NonNull},
     slice,
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    sync::atomic::{self, AtomicU8, AtomicUsize, Ordering},
 };
+
+pub mod allocated;
 
 pub struct LogBuffer {
     data_ptr: NonNull<AtomicU8>,
@@ -25,7 +26,7 @@ pub struct LogBuffer {
     /// The [`DescriptorId`] of the last valid [`Descriptor`].
     id_tail: AtomicDescriptorId,
 
-    base_sequence: usize,
+    initial_sequence: usize,
 }
 
 impl LogBuffer {
@@ -59,16 +60,44 @@ impl LogBuffer {
             descriptor_capacity.strict_mul(mem::size_of::<Descriptor>()) <= isize::MAX as usize
         );
 
+        let logical_head = 0usize.wrapping_sub(data_capacity);
+        let logical_tail = logical_head;
+        let initial_sequence = 0usize.wrapping_sub(descriptor_capacity);
+        let id_head = DescriptorId::new_from_seq(initial_sequence);
+        let id_tail = id_head;
+
         // SAFETY:
         //
         // The invariants of [`LogBuffer::new()`] are a superset of the invariants of this call.
         unsafe { ptr::write_bytes(data_ptr.as_ptr(), 0, data_capacity) }
 
-        let logical_head = 0usize.wrapping_sub(data_capacity);
-        let logical_tail = logical_head;
-        let base_sequence = 0usize.wrapping_sub(descriptor_capacity);
-        let id_head = DescriptorId::new_truncating(base_sequence);
-        let id_tail = id_head;
+        // SAFETY:
+        //
+        // The invariants of [`LogBuffer::new()`] are a superset of the invariants of this call.
+        let descriptors = unsafe {
+            slice::from_raw_parts_mut(
+                descriptor_ptr.as_ptr().cast::<MaybeUninit<Descriptor>>(),
+                descriptor_capacity,
+            )
+        };
+
+        let mut index = 0;
+        while index < descriptor_capacity {
+            let descriptor = &mut descriptors[index];
+
+            let sequence = initial_sequence.wrapping_add(index).wrapping_sub(descriptor_capacity);
+            descriptor.write(Descriptor {
+                state_id: AtomicDescriptorStateId::new(DescriptorStateId::new(
+                    DescriptorId::new_from_seq(sequence),
+                    DescriptorState::MissingData,
+                )),
+                logical_head: AtomicUsize::new(0),
+                logical_tail: AtomicUsize::new(0),
+                sequence: AtomicUsize::new(sequence),
+            });
+
+            index += 1;
+        }
 
         let mut logbuffer = Self {
             data_ptr,
@@ -83,7 +112,7 @@ impl LogBuffer {
             id_head: AtomicDescriptorId::new(id_head),
             id_tail: AtomicDescriptorId::new(id_tail),
 
-            base_sequence,
+            initial_sequence,
         };
 
         assert!(logbuffer.check_data_block_size(starter_message.len()));
@@ -95,11 +124,11 @@ impl LogBuffer {
         *base_descriptor = Descriptor {
             state_id: AtomicDescriptorStateId::new(DescriptorStateId::new(
                 id_head,
-                DescriptorState::Committed,
+                DescriptorState::Finalized,
             )),
             logical_head: AtomicUsize::new(logical_head),
             logical_tail: AtomicUsize::new(logical_tail),
-            sequence: AtomicUsize::new(base_sequence),
+            sequence: AtomicUsize::new(initial_sequence),
         };
 
         logbuffer.logical_head = AtomicUsize::new(logical_head);
@@ -126,6 +155,121 @@ impl LogBuffer {
         logbuffer
     }
 
+    pub fn read<'buffer>(
+        &self,
+        sequence: usize,
+        buffer: &'buffer mut [u8],
+    ) -> Option<Message<'buffer>> {
+        let mut sequence = sequence;
+        loop {
+            let state_id = loop {
+                let expected_id = DescriptorId::new_from_seq(sequence);
+
+                let descriptor = self.descriptor(expected_id);
+
+                let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+                if start_state_id != DescriptorStateId::new(expected_id, DescriptorState::Finalized)
+                {
+                    break start_state_id;
+                }
+
+                let loaded_sequence = descriptor.sequence.load(Ordering::Relaxed);
+                if loaded_sequence != sequence {
+                    break start_state_id;
+                }
+
+                let logical_head = descriptor.logical_head.load(Ordering::Relaxed);
+                let logical_tail = descriptor.logical_tail.load(Ordering::Relaxed);
+
+                atomic::fence(Ordering::Acquire);
+
+                let middle_state_id = descriptor.state_id.load(Ordering::Relaxed);
+                if start_state_id != middle_state_id {
+                    break middle_state_id;
+                }
+
+                let (block_pos, mut data_size) =
+                    if !self.is_block_wrapped(logical_tail, logical_head) {
+                        (logical_tail, logical_head.strict_sub(logical_tail))
+                    } else {
+                        let block_pos = logical_head & !self.data_mask();
+                        let data_size = logical_head - block_pos;
+
+                        (block_pos, data_size)
+                    };
+
+                data_size -= mem::size_of::<DescriptorId>();
+
+                let data = self.data_at_pos(block_pos + mem::size_of::<DescriptorId>());
+                let data = &data[..data_size];
+
+                for (buffer_byte, data_byte) in buffer.iter_mut().zip(data.iter()) {
+                    *buffer_byte = data_byte.load(Ordering::Relaxed);
+                }
+
+                atomic::fence(Ordering::Acquire);
+
+                let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+                if start_state_id != end_state_id {
+                    break end_state_id;
+                }
+
+                let message = Message {
+                    sequence,
+                    buffer: &mut buffer[..data_size],
+                };
+
+                return Some(message);
+            };
+
+            let tail_sequence = self.tail_sequence();
+            if sequence < tail_sequence {
+                sequence = tail_sequence;
+            } else if state_id
+                == DescriptorStateId::new(
+                    DescriptorId::new_from_seq(sequence),
+                    DescriptorState::MissingData,
+                )
+            {
+                sequence = sequence.wrapping_add(1);
+            } else {
+                return None;
+            }
+        }
+    }
+
+    pub fn tail_sequence(&self) -> usize {
+        loop {
+            let id_tail = self.id_tail.load(Ordering::Acquire);
+
+            let descriptor = self.descriptor(id_tail);
+
+            let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+
+            let sequence = descriptor.sequence.load(Ordering::Relaxed);
+
+            atomic::fence(Ordering::Acquire);
+
+            let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+            if start_state_id != end_state_id
+                || start_state_id.id() != id_tail
+            {
+                continue;
+            }
+
+            if matches!(
+                start_state_id.state(),
+                DescriptorState::MissingData | DescriptorState::Finalized
+            ) {
+                return sequence;
+            }
+        }
+    }
+
+    pub const fn initial_sequence(&self) -> usize {
+        self.initial_sequence
+    }
+
     /// Returns `true` if the size of the data is supported.
     const fn check_data_block_size(&self, data_size: usize) -> bool {
         Self::compute_data_block_size(data_size) <= self.data_capacity / 2
@@ -143,14 +287,14 @@ impl LogBuffer {
         let logical_head = logical_tail.wrapping_add(size);
 
         if !self.is_block_wrapped(logical_tail, logical_head) {
-            return logical_tail;
+            return logical_head;
         }
 
         (logical_head & !self.data_mask()) + size
     }
 
     const fn is_block_wrapped(&self, logical_tail: usize, logical_head: usize) -> bool {
-        let head_wrap_count = logical_head >> self.data_bits();
+        let head_wrap_count = logical_head.wrapping_sub(1) >> self.data_bits();
         let tail_wrap_count = logical_tail >> self.data_bits();
         head_wrap_count != tail_wrap_count
     }
@@ -177,6 +321,11 @@ impl LogBuffer {
 
     const fn descriptor(&self, id: DescriptorId) -> &Descriptor {
         let index = id.to_index(self.descriptor_capacity);
+        &self.descriptors()[index]
+    }
+
+    const fn descriptor_from_seq(&self, seq: usize) -> &Descriptor {
+        let index = DescriptorId::new_from_seq(seq).to_index(self.descriptor_capacity);
         &self.descriptors()[index]
     }
 
@@ -238,6 +387,15 @@ impl LogBuffer {
         //   `isize::MAX`.
         unsafe { slice::from_raw_parts_mut(self.descriptor_ptr.as_ptr(), self.descriptor_capacity) }
     }
+}
+
+/// A log message, with its associated sequence number, metadata, and the extracted part of the
+/// data buffer.
+pub struct Message<'buffer> {
+    /// The sequence number of the [`Message`].
+    pub sequence: usize,
+    /// Extracted portion of the data buffer associated with this [`Message`].
+    pub buffer: &'buffer mut [u8],
 }
 
 /// Internal data associated with a particular message.
@@ -325,6 +483,17 @@ impl DescriptorStateId {
     }
 }
 
+impl fmt::Display for DescriptorStateId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug_struct = f.debug_struct("DescriptorStateId");
+
+        debug_struct.field("state", &self.state());
+        debug_struct.field("id", &self.id());
+
+        debug_struct.finish()
+    }
+}
+
 #[repr(transparent)]
 struct AtomicDescriptorId(AtomicUsize);
 
@@ -370,6 +539,10 @@ impl DescriptorId {
         Self(val & DescriptorStateId::ID_MASK)
     }
 
+    const fn new_from_seq(seq: usize) -> Self {
+        Self::new_truncating(seq)
+    }
+
     /// Returns the previous [`DescriptorId`] in the modular representation.
     const fn prev(self) -> Self {
         Self::new_truncating(self.to_raw().wrapping_sub(1))
@@ -413,4 +586,25 @@ enum DescriptorState {
     Committed,
     /// The message is immutable and ready to be consumed or eventually overwritten.
     Finalized,
+}
+
+#[cfg(test)]
+mod test {
+    use crate::allocated::AllocatedLogBuffer;
+
+    #[test]
+    fn initial_read() {
+        let logbuffer = AllocatedLogBuffer::new(128 * 1024, 1024, "TEST");
+
+        let mut sequence = logbuffer.initial_sequence();
+        let mut buffer = [0; 4096];
+
+        let mut processed_messages = 0;
+        while let Some(message) = logbuffer.read(sequence, &mut buffer) {
+            sequence = message.sequence + 1;
+            processed_messages += 1;
+        }
+
+        assert_eq!(processed_messages, 1);
+    }
 }
