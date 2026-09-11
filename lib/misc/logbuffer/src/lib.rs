@@ -225,7 +225,10 @@ impl LogBuffer {
                 let data = self.data_at_pos(block_pos + mem::size_of::<DescriptorId>());
                 let data = &data[..data_size];
 
-                for (buffer_byte, data_byte) in buffer.iter_mut().zip(data.iter()) {
+                let copied_size = buffer.len().min(data_size);
+
+                for (buffer_byte, data_byte) in buffer.iter_mut().zip(data.iter()).take(copied_size)
+                {
                     *buffer_byte = data_byte.load(Ordering::Relaxed);
                 }
 
@@ -238,7 +241,7 @@ impl LogBuffer {
 
                 let message = Message {
                     sequence,
-                    buffer: &mut buffer[..data_size],
+                    buffer: &mut buffer[..copied_size],
                 };
 
                 return Some(message);
@@ -284,6 +287,8 @@ impl LogBuffer {
             ) {
                 return sequence;
             }
+
+            core::hint::spin_loop();
         }
     }
 
@@ -335,7 +340,7 @@ impl LogBuffer {
 
     /// Returns a bit mask that truncates any indices that aren't valid for the data buffer.
     const fn data_mask(&self) -> usize {
-        1usize << self.data_bits()
+        (1usize << self.data_bits()) - 1
     }
 
     const fn data_at_pos(&self, logical: usize) -> &[AtomicU8] {
