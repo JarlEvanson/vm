@@ -34,6 +34,8 @@ pub struct LogBuffer {
     /// The [`DescriptorId`] of the last valid [`Descriptor`].
     id_tail: AtomicDescriptorId,
 
+    last_finalized_sequence: AtomicUsize,
+
     initial_sequence: usize,
 }
 
@@ -101,8 +103,8 @@ impl LogBuffer {
                     DescriptorId::new_from_seq(sequence),
                     DescriptorState::MissingData,
                 )),
-                logical_head: AtomicUsize::new(0),
-                logical_tail: AtomicUsize::new(0),
+                logical_head: AtomicUsize::new(EMPTY_LOGICAL_POS),
+                logical_tail: AtomicUsize::new(EMPTY_LOGICAL_POS),
                 sequence: AtomicUsize::new(sequence),
             });
 
@@ -121,6 +123,8 @@ impl LogBuffer {
 
             id_head: AtomicDescriptorId::new(id_head),
             id_tail: AtomicDescriptorId::new(id_tail),
+
+            last_finalized_sequence: AtomicUsize::new(initial_sequence),
 
             initial_sequence,
         };
@@ -273,6 +277,75 @@ impl LogBuffer {
 
     /// Reserves at least `size` bytes in this [`LogBuffer`].
     pub fn reserve(&self, size: usize) -> Option<ReservedMessage<'_>> {
+        if !self.check_data_block_size(size) {
+            return None;
+        }
+
+        let mut id_head = self.id_head.load(Ordering::Acquire);
+        let id = loop {
+            let id = id_head.next();
+            let id_previous_wrap = id.prev_wrap(self.descriptor_capacity);
+
+            if id_previous_wrap == self.id_tail.load(Ordering::Relaxed) {
+                todo!("handle descriptor invalidation")
+            }
+
+            if let Err(actual_id_head) =
+                self.id_head
+                    .compare_exchange(id_head, id, Ordering::AcqRel, Ordering::Acquire)
+            {
+                id_head = actual_id_head;
+            } else {
+                break id;
+            }
+        };
+
+        let descriptor = self.descriptor(id);
+
+        let current_state_id = descriptor.state_id.load(Ordering::Acquire);
+        if current_state_id
+            != DescriptorStateId::new(
+                id.prev_wrap(self.descriptor_capacity),
+                DescriptorState::MissingData,
+            )
+        {
+            todo!("handle ABA issue");
+        }
+
+        let new_state_id = DescriptorStateId::new(id, DescriptorState::Reserved);
+        if descriptor
+            .state_id
+            .compare_exchange(
+                current_state_id,
+                new_state_id,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            todo!("handle ABA issue");
+        }
+
+        descriptor
+            .sequence
+            .fetch_add(self.descriptor_capacity, Ordering::Relaxed);
+
+        let prev_descriptor = self.descriptor(id.prev());
+        let expected_state_id = DescriptorStateId::new(id.prev(), DescriptorState::Committed);
+        let new_state_id = DescriptorStateId::new(id.prev(), DescriptorState::Finalized);
+        if prev_descriptor
+            .state_id
+            .compare_exchange(
+                expected_state_id,
+                new_state_id,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            self.update_last_finalized();
+        }
+
         todo!()
     }
 
@@ -287,6 +360,58 @@ impl LogBuffer {
 
     pub const fn initial_sequence(&self) -> usize {
         self.initial_sequence
+    }
+
+    fn allocate_data(&self, id: DescriptorId, size: usize) -> (usize, usize) {
+        if size == 0 {
+            return (EMPTY_LOGICAL_POS, EMPTY_LOGICAL_POS);
+        }
+
+        let data_block_size = Self::compute_data_block_size(size);
+
+        // The current logical head is the logical tail of the newly allocated data block.
+        let mut logical_tail = self.logical_head.load(Ordering::Acquire);
+        let logical_head = loop {
+            let logical_head = self.compute_logical_head(logical_tail, data_block_size);
+            let logical_head_padded = self.compute_logical_head(logical_tail, Self::compute_data_block_size_padded(size));
+
+            if let Err(value) = self.logical_head.compare_exchange(logical_tail, logical_head_padded, Ordering::AcqRel, Ordering::Acquire) {
+                logical_tail = value;
+                continue;
+            }
+
+            break logical_head;
+        };
+
+        todo!()
+    }
+
+    fn update_last_finalized(&self) {
+        let mut old_sequence = self.last_finalized_sequence.load(Ordering::Acquire);
+
+        loop {
+            let mut finalized_sequence = old_sequence;
+            let mut try_sequence = finalized_sequence.wrapping_add(1);
+
+            while let Some(message) = self.read(try_sequence, &mut []) {
+                finalized_sequence = message.sequence;
+                try_sequence = finalized_sequence.wrapping_add(1);
+            }
+
+            if finalized_sequence == old_sequence {
+                return;
+            }
+
+            match self.last_finalized_sequence.compare_exchange(
+                old_sequence,
+                finalized_sequence,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return,
+                Err(sequence) => old_sequence = sequence,
+            }
+        }
     }
 
     /// Returns the sequence number associated with the tail [`DescriptorId`].
@@ -451,7 +576,7 @@ pub struct Message<'buffer> {
 
 /// A reserved segment of the [`Ringbuffer`].
 pub struct ReservedMessage<'buffer> {
-    ringbuffer: &'buffer LogBuffer,
+    logbuffer: &'buffer LogBuffer,
     sequence: usize,
     buffer: &'buffer [AtomicU8],
 }
@@ -469,12 +594,72 @@ impl<'buffer> ReservedMessage<'buffer> {
 
     /// Commits the [`ReservedMessage`] into the associated [`LogBuffer`].
     pub fn commit(self) -> CommittedMessage<'buffer> {
-        todo!()
+        let descriptor_id = DescriptorId::new_from_seq(self.sequence);
+        let descriptor = self.logbuffer.descriptor(descriptor_id);
+
+        let current_state_id = DescriptorStateId::new(descriptor_id, DescriptorState::Reserved);
+        let new_state_id = DescriptorStateId::new(descriptor_id, DescriptorState::Committed);
+
+        if descriptor
+            .state_id
+            .compare_exchange(
+                current_state_id,
+                new_state_id,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            unreachable!()
+        }
+
+        let id_head = self.logbuffer.id_head.load(Ordering::Acquire);
+        if id_head != descriptor_id {
+            let current_state_id = new_state_id;
+            let new_state_id = DescriptorStateId::new(descriptor_id, DescriptorState::Finalized);
+
+            if descriptor
+                .state_id
+                .compare_exchange(
+                    current_state_id,
+                    new_state_id,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                self.logbuffer.update_last_finalized();
+            }
+        }
+
+        CommittedMessage {
+            logbuffer: self.logbuffer,
+            sequence: self.sequence,
+        }
     }
 
     /// Finalizes the [`ReservedMessage`], thereby closing the editing window.
     pub fn finalize(self) {
-        todo!()
+        let descriptor_id = DescriptorId::new_from_seq(self.sequence);
+        let descriptor = self.logbuffer.descriptor(descriptor_id);
+
+        let current_state_id = DescriptorStateId::new(descriptor_id, DescriptorState::Reserved);
+        let new_state_id = DescriptorStateId::new(descriptor_id, DescriptorState::Finalized);
+
+        if descriptor
+            .state_id
+            .compare_exchange(
+                current_state_id,
+                new_state_id,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            unreachable!()
+        }
+
+        self.logbuffer.update_last_finalized();
     }
 }
 
@@ -482,7 +667,7 @@ impl<'buffer> ReservedMessage<'buffer> {
 ///
 /// The associated [`Message`] might be able to be reopened for editing.
 pub struct CommittedMessage<'buffer> {
-    ringbuffer: &'buffer LogBuffer,
+    logbuffer: &'buffer LogBuffer,
     sequence: usize,
 }
 
@@ -699,13 +884,36 @@ mod test {
         let mut sequence = logbuffer.tail_sequence();
         let mut buffer = [0; 4096];
 
-        let mut processed_messages = 0;
-        while let Some(message) = logbuffer.read(sequence, &mut buffer) {
-            sequence = message.sequence + 1;
-            processed_messages += 1;
-            assert_eq!(processed_messages, 1);
+        let message = logbuffer.read(sequence, &mut buffer).unwrap();
+        assert!(logbuffer.read(message.sequence + 1, &mut buffer).is_none());
+    }
+
+    #[test]
+    fn reserve_write_and_finalize() {
+        let logbuffer = AllocatedLogBuffer::new(128 * 1024, 1024, "INIT");
+
+        let msg_payload = b"Hello, World!";
+        let reserved = logbuffer
+            .reserve(msg_payload.len())
+            .expect("Failed to reserve memory block");
+
+        let reserved_seq = reserved.sequence();
+
+        // Write data to atomic slice buffer
+        for (i, &byte) in msg_payload.iter().enumerate() {
+            reserved.buffer()[i].store(byte, Ordering::Relaxed);
         }
 
-        assert_eq!(processed_messages, 1);
+        // Finalize the message directly
+        reserved.finalize();
+
+        // Read and verify the newly appended message
+        let mut read_buf = [0u8; 256];
+        let message = logbuffer
+            .read(reserved_seq, &mut read_buf)
+            .expect("Expected message to be readable");
+
+        assert_eq!(message.sequence, reserved_seq);
+        assert_eq!(message.buffer, msg_payload);
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use logbuffer::allocated::AllocatedLogBuffer;
 
 fn main() {
@@ -6,17 +8,21 @@ fn main() {
     let mut sequence = logbuffer.tail_sequence();
     let mut buffer = [0; 4096];
 
-    let mut processed_messages = 0;
-    while let Some(message) = logbuffer.read(sequence, &mut buffer) {
-        println!(
-            "item {processed_messages}: retrieved sequence {}: {:#?}",
-            message.sequence, message.buffer
-        );
+    let message = logbuffer.read(sequence, &mut buffer).unwrap();
+    sequence = message.sequence;
+    assert!(logbuffer.read(message.sequence + 1, &mut buffer).is_none());
 
-        sequence = message.sequence + 1;
-        processed_messages += 1;
-        assert_eq!(processed_messages, 1);
+    let message_contents = " World!";
+    let message = logbuffer
+        .reserve(message_contents.len())
+        .expect("failed to reserve message space");
+
+    for (i, &byte) in message_contents.as_bytes().iter().enumerate() {
+        message.buffer()[i].store(byte, Ordering::Relaxed);
     }
 
-    assert_eq!(processed_messages, 1);
+    message.finalize();
+
+    let message = logbuffer.read(sequence, &mut buffer).unwrap();
+    assert!(logbuffer.read(message.sequence + 1, &mut buffer).is_none());
 }
