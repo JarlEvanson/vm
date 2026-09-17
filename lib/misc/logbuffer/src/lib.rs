@@ -3,6 +3,7 @@
 use core::{
     fmt,
     ptr::NonNull,
+    slice,
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
@@ -111,6 +112,90 @@ impl LogBuffer {
     /// before any other [`Message`] in the [`LogBuffer`].
     pub fn tail_sequence(&self) -> u64 {
         todo!()
+    }
+
+    /// Returns the number of bits required to represent an arbitrary position in the data buffer.
+    const fn data_bits(&self) -> u32 {
+        self.data_capacity.trailing_zeros()
+    }
+
+    /// Returns a bit mask that truncates any indices that aren't valid for the data buffer.
+    const fn data_mask(&self) -> usize {
+        (1usize << self.data_bits()) - 1
+    }
+
+    const fn data_at_pos(&self, logical: usize) -> &[AtomicU8] {
+        let index = logical & self.data_mask();
+        self.data().split_at(index).1
+    }
+
+    const fn data_at_pos_mut(&mut self, logical: usize) -> &mut [AtomicU8] {
+        let index = logical & self.data_mask();
+        self.data_mut().split_at_mut(index).1
+    }
+
+    const fn descriptor(&self, id: DescriptorId) -> &Descriptor {
+        let index = id.to_index(self.descriptor_capacity);
+        &self.descriptors()[index]
+    }
+
+    const fn descriptor_mut(&mut self, id: DescriptorId) -> &mut Descriptor {
+        let index = id.to_index(self.descriptor_capacity);
+        &mut self.descriptors_mut()[index]
+    }
+
+    const fn data(&self) -> &[AtomicU8] {
+        // SAFETY:
+        //
+        // The invariants of the [`LogBuffer`] creation functions ensures the following:
+        //
+        // - `self.data_ptr` is non-null, valid for reads and writes for `self.data_capacity`
+        //   [`AtomicU8`]s, and properly aligned.
+        // - `self.data_ptr` points to `self.data_capacity` properly initialized [`AtomicU8`]s.
+        // - `self.data_capacity * mem::size_of::<AtomicU8>()` is less than or equal to
+        //   `isize::MAX`.
+        unsafe { slice::from_raw_parts(self.data_ptr.as_ptr(), self.data_capacity) }
+    }
+
+    const fn data_mut(&mut self) -> &mut [AtomicU8] {
+        // SAFETY:
+        //
+        // The invariants of the [`LogBuffer`] creation functions ensures the following:
+        //
+        // - `self.data_ptr` is non-null, valid for reads and writes for `self.data_capacity`
+        //   [`AtomicU8`]s, and properly aligned.
+        // - `self.data_ptr` points to `self.data_capacity` properly initialized [`AtomicU8`]s.
+        // - `self.data_capacity * mem::size_of::<AtomicU8>()` is less than or equal to
+        //   `isize::MAX`.
+        unsafe { slice::from_raw_parts_mut(self.data_ptr.as_ptr(), self.data_capacity) }
+    }
+
+    const fn descriptors(&self) -> &[Descriptor] {
+        // SAFETY:
+        //
+        // The invariants of the [`LogBuffer`] creation functions ensure the following:
+        //
+        // - `self.descriptor_ptr` is non-null, valid for reads and writes for
+        //   `self.descriptor_capacity` [`Descriptor`]s, and properly aligned.
+        // - `self.descriptor_ptr` points to [`self.descriptor_capacity`] properly initialized
+        //   [`Descriptor`]s.
+        // - `self.descriptor_capacity * mem::size_of::<Descriptor>()` is less than or equal to
+        //   `isize::MAX`.
+        unsafe { slice::from_raw_parts(self.descriptor_ptr.as_ptr(), self.descriptor_capacity) }
+    }
+
+    const fn descriptors_mut(&mut self) -> &mut [Descriptor] {
+        // SAFETY:
+        //
+        // The invariants of the [`LogBuffer`] creation functions ensure the following:
+        //
+        // - `self.descriptor_ptr` is non-null, valid for reads and writes for
+        //   `self.descriptor_capacity` [`Descriptor`]s, and properly aligned.
+        // - `self.descriptor_ptr` points to [`self.descriptor_capacity`] properly initialized
+        //   [`Descriptor`]s.
+        // - `self.descriptor_capacity * mem::size_of::<Descriptor>()` is less than or equal to
+        //   `isize::MAX`.
+        unsafe { slice::from_raw_parts_mut(self.descriptor_ptr.as_ptr(), self.descriptor_capacity) }
     }
 }
 
