@@ -12,7 +12,7 @@ use core::sync::atomic::AtomicU32;
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
 
-use conversion::u64_to_usize_truncating;
+use conversion::{u64_to_usize_truncating, usize_to_u64_truncating};
 
 #[cfg(not(target_os = "none"))]
 pub mod allocated;
@@ -199,8 +199,10 @@ impl LogBuffer {
                     break 'internal_read (end_state_id, logical_tail == FAILED_LOGICAL_POS);
                 }
 
+                // On a successful read, we try to read the next the [`Descriptor`] associated with
+                // the next sequence. This continues until we fail to successfuly read a message.
                 sequence += 1;
-                continue;
+                continue 'external_read;
             };
 
             let Some(new_sequence) = self.handle_failed_read(sequence, state_id, data_lost) else {
@@ -214,7 +216,36 @@ impl LogBuffer {
     /// Returns the sequence number that will be associated with the next [`Message`] to be
     /// reserved.
     pub fn next_reserved_sequence(&self) -> u64 {
-        todo!()
+        loop {
+            let last_finalized_sequence = self.last_finalized_sequence();
+
+            let id_head = self.id_head.load(Ordering::Acquire);
+
+            let descriptor = self.descriptor(DescriptorId::from_seq(last_finalized_sequence));
+
+            let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+            if matches!(
+                start_state_id.state(),
+                DescriptorState::Reserved | DescriptorState::Committed
+            ) {
+                continue;
+            }
+
+            let loaded_sequence = descriptor.sequence_load(Ordering::Acquire);
+            if loaded_sequence != last_finalized_sequence {
+                continue;
+            }
+
+            let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+            if end_state_id != start_state_id {
+                continue;
+            }
+
+            let difference = id_head.to_raw().wrapping_sub(start_state_id.id().to_raw());
+            return last_finalized_sequence
+                .wrapping_add(usize_to_u64_truncating(difference))
+                .wrapping_add(1);
+        }
     }
 
     /// Returns the sequence number associated with the tail [`Message`].
