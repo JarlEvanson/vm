@@ -99,12 +99,11 @@ impl LogBuffer {
         let mut sequence = sequence;
         loop {
             let (state_id, data_lost) = 'internal_read: {
-                let expected_id = DescriptorId::new_truncating(u64_to_usize_truncating(sequence));
-
+                let expected_id = DescriptorId::from_seq(sequence);
                 let descriptor = self.descriptor(expected_id);
 
                 let start_state_id = descriptor.state_id.load(Ordering::Acquire);
-                if matches!(start_state_id.state(), DescriptorState::Reserved)
+                if !matches!(start_state_id.state(), DescriptorState::Finalized)
                     || start_state_id.id() != expected_id
                 {
                     break 'internal_read (start_state_id, false);
@@ -171,7 +170,45 @@ impl LogBuffer {
     /// Returns the sequence number that will be associated with the next [`Message`] available for
     /// readers.
     pub fn next_read_sequence(&self) -> u64 {
-        todo!()
+        let mut sequence = self.last_finalized_sequence() + 1;
+
+        'external_read: loop {
+            let (state_id, data_lost) = 'internal_read: {
+                let expected_id = DescriptorId::from_seq(sequence);
+                let descriptor = self.descriptor(expected_id);
+
+                let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+                if matches!(start_state_id.state(), DescriptorState::Reserved)
+                    || start_state_id.id() != expected_id
+                {
+                    break 'internal_read (start_state_id, false);
+                }
+
+                let loaded_sequence = descriptor.sequence_load(Ordering::Relaxed);
+                if loaded_sequence != sequence {
+                    break 'internal_read (start_state_id, false);
+                }
+
+                let logical_head = descriptor.logical_head.load(Ordering::Relaxed);
+                let logical_tail = descriptor.logical_tail.load(Ordering::Relaxed);
+
+                atomic::fence(Ordering::Acquire);
+
+                let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+                if start_state_id != end_state_id || logical_tail == FAILED_LOGICAL_POS {
+                    break 'internal_read (end_state_id, logical_tail == FAILED_LOGICAL_POS);
+                }
+
+                sequence += 1;
+                continue;
+            };
+
+            let Some(new_sequence) = self.handle_failed_read(sequence, state_id, data_lost) else {
+                return sequence + 1;
+            };
+
+            sequence = new_sequence;
+        }
     }
 
     /// Returns the sequence number that will be associated with the next [`Message`] to be
@@ -199,7 +236,7 @@ impl LogBuffer {
     ) -> Option<u64> {
         let tail_sequence = self.tail_sequence_internal();
         let missing_data_state_id = DescriptorStateId::new(
-            DescriptorId::new_truncating(u64_to_usize_truncating(sequence)),
+            DescriptorId::from_seq(sequence),
             DescriptorState::MissingData,
         );
 
@@ -633,6 +670,10 @@ impl DescriptorId {
     /// Creates a new [`DescriptorId`] from the provided value, truncating as necessary.
     const fn new_truncating(val: usize) -> Self {
         Self(val & DescriptorStateId::ID_MASK)
+    }
+
+    const fn from_seq(sequence: u64) -> Self {
+        Self::new_truncating(u64_to_usize_truncating(sequence))
     }
 
     /// Returns the previous [`DescriptorId`] in the modular representation.
