@@ -11,6 +11,9 @@ use core::sync::atomic::AtomicU32;
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
 
+#[cfg(not(target_os = "none"))]
+pub mod allocated;
+
 #[cfg(not(all(
     target_has_atomic = "8",
     any(target_has_atomic = "64", target_has_atomic = "32"),
@@ -79,7 +82,7 @@ impl LogBuffer {
     /// This returns [`None`] if the requested `sequence` is not yet available.
     pub fn read<'buffer>(
         &self,
-        sequence: usize,
+        sequence: u64,
         buffer: &'buffer mut [u8],
     ) -> Option<Message<'buffer>> {
         todo!()
