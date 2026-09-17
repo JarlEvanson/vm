@@ -1,7 +1,7 @@
 #![cfg_attr(target_os = "none", no_std)]
 
 use core::{
-    fmt,
+    fmt, mem,
     ptr::NonNull,
     slice,
     sync::atomic::{self, AtomicU8, AtomicUsize, Ordering},
@@ -12,8 +12,18 @@ use core::sync::atomic::AtomicU32;
 #[cfg(target_has_atomic = "64")]
 use core::sync::atomic::AtomicU64;
 
+use conversion::u64_to_usize_truncating;
+
 #[cfg(not(target_os = "none"))]
 pub mod allocated;
+
+const EMPTY_LOGICAL_POS: usize = 0x1;
+const FAILED_LOGICAL_POS: usize = 0x3;
+
+const _: () = assert!(!EMPTY_LOGICAL_POS.is_multiple_of(mem::size_of_val(&EMPTY_LOGICAL_POS)));
+const _: () = assert!(!EMPTY_LOGICAL_POS.is_multiple_of(mem::align_of_val(&EMPTY_LOGICAL_POS)));
+const _: () = assert!(!FAILED_LOGICAL_POS.is_multiple_of(mem::size_of_val(&FAILED_LOGICAL_POS)));
+const _: () = assert!(!FAILED_LOGICAL_POS.is_multiple_of(mem::align_of_val(&FAILED_LOGICAL_POS)));
 
 #[cfg(not(all(
     target_has_atomic = "8",
@@ -86,7 +96,71 @@ impl LogBuffer {
         sequence: u64,
         buffer: &'buffer mut [u8],
     ) -> Option<Message<'buffer>> {
-        todo!()
+        let mut sequence = sequence;
+        loop {
+            let (state_id, data_lost) = 'internal_read: {
+                let expected_id = DescriptorId::new_truncating(u64_to_usize_truncating(sequence));
+
+                let descriptor = self.descriptor(expected_id);
+
+                let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+                if matches!(start_state_id.state(), DescriptorState::Reserved)
+                    || start_state_id.id() != expected_id
+                {
+                    break 'internal_read (start_state_id, false);
+                }
+
+                // Load metadata for the [`Message`].
+                let loaded_sequence = descriptor.sequence_load(Ordering::Relaxed);
+                if loaded_sequence != sequence {
+                    break 'internal_read (start_state_id, false);
+                }
+
+                let logical_head = descriptor.logical_head.load(Ordering::Relaxed);
+                let logical_tail = descriptor.logical_tail.load(Ordering::Relaxed);
+
+                atomic::fence(Ordering::Acquire);
+
+                let middle_state_id = descriptor.state_id.load(Ordering::Relaxed);
+                if start_state_id != middle_state_id || logical_tail == FAILED_LOGICAL_POS {
+                    break 'internal_read (middle_state_id, logical_tail == FAILED_LOGICAL_POS);
+                }
+
+                if logical_tail == EMPTY_LOGICAL_POS {
+                    return Some(Message::new(sequence, &mut buffer[..0]));
+                }
+
+                let (block_pos, mut data_size) =
+                    if !self.is_block_wrapped(logical_tail, logical_head) {
+                        (logical_tail, logical_head.strict_sub(logical_tail))
+                    } else {
+                        (0, logical_head)
+                    };
+
+                data_size -= mem::size_of::<DescriptorId>();
+
+                let data = self.data_at_pos(block_pos + mem::size_of::<DescriptorId>());
+                let data = &data[..data_size];
+
+                let copied_size = buffer.len().min(data_size);
+
+                for (buffer_byte, data_byte) in buffer.iter_mut().zip(data.iter()).take(copied_size)
+                {
+                    *buffer_byte = data_byte.load(Ordering::Relaxed);
+                }
+
+                atomic::fence(Ordering::Acquire);
+
+                let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+                if start_state_id != end_state_id {
+                    break 'internal_read (end_state_id, false);
+                }
+
+                return Some(Message::new(sequence, buffer));
+            };
+
+            sequence = self.handle_failed_read(sequence, state_id, data_lost)?;
+        }
     }
 
     /// Reserves at least `size` bytes in this [`LogBuffer`].
@@ -114,6 +188,28 @@ impl LogBuffer {
         self.read(0, &mut [])
             .expect("the message associated with sequence zero has always already been published")
             .sequence()
+    }
+
+    #[inline]
+    fn handle_failed_read(
+        &self,
+        sequence: u64,
+        state_id: DescriptorStateId,
+        data_lost: bool,
+    ) -> Option<u64> {
+        let tail_sequence = self.tail_sequence_internal();
+        let missing_data_state_id = DescriptorStateId::new(
+            DescriptorId::new_truncating(u64_to_usize_truncating(sequence)),
+            DescriptorState::MissingData,
+        );
+
+        if sequence < tail_sequence {
+            Some(tail_sequence)
+        } else if state_id == missing_data_state_id || data_lost {
+            Some(sequence.wrapping_add(1))
+        } else {
+            None
+        }
     }
 
     /// Returns the sequence number associated with the tail [`DescriptorId`].
@@ -159,6 +255,12 @@ impl LogBuffer {
         {
             self.u32_to_u64_sequence(self.last_finalized_sequence.load(Ordering::Acquire))
         }
+    }
+
+    const fn is_block_wrapped(&self, logical_tail: usize, logical_head: usize) -> bool {
+        let head_wrap_count = logical_head.wrapping_sub(1) >> self.data_bits();
+        let tail_wrap_count = logical_tail >> self.data_bits();
+        head_wrap_count != tail_wrap_count
     }
 
     #[cfg(not(target_has_atomic = "64"))]
