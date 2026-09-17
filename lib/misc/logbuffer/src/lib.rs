@@ -4,7 +4,7 @@ use core::{
     fmt,
     ptr::NonNull,
     slice,
-    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
+    sync::atomic::{self, AtomicU8, AtomicUsize, Ordering},
 };
 
 #[cfg(not(target_has_atomic = "64"))]
@@ -111,7 +111,71 @@ impl LogBuffer {
     /// This is the oldest (from the context of the [`LogBuffer`]) [`Message`] and will be deleted
     /// before any other [`Message`] in the [`LogBuffer`].
     pub fn tail_sequence(&self) -> u64 {
-        todo!()
+        self.read(0, &mut [])
+            .expect("the message associated with sequence zero has always already been published")
+            .sequence()
+    }
+
+    /// Returns the sequence number associated with the tail [`DescriptorId`].
+    fn tail_sequence_internal(&self) -> u64 {
+        loop {
+            let id_tail = self.id_tail.load(Ordering::Acquire);
+
+            let descriptor = self.descriptor(id_tail);
+
+            let start_state_id = descriptor.state_id.load(Ordering::Acquire);
+
+            let sequence = descriptor.sequence_load(Ordering::Relaxed);
+
+            atomic::fence(Ordering::Acquire);
+
+            let end_state_id = descriptor.state_id.load(Ordering::Relaxed);
+            if start_state_id != end_state_id || start_state_id.id() != id_tail {
+                continue;
+            }
+
+            if matches!(
+                start_state_id.state(),
+                DescriptorState::MissingData | DescriptorState::Finalized
+            ) {
+                return sequence;
+            }
+
+            core::hint::spin_loop();
+        }
+    }
+
+    /// Returns a sequence number for which every sequence number up to and including itself is
+    /// associated with a [`Message`] that is finalized and can be read (if it hasn't been
+    /// overwritten yet).
+    ///
+    /// The result of this function monotonically increases.
+    fn last_finalized_sequence(&self) -> u64 {
+        #[cfg(target_has_atomic = "64")]
+        {
+            self.last_finalized_sequence.load(Ordering::Acquire)
+        }
+        #[cfg(not(target_has_atomic = "64"))]
+        {
+            self.u32_to_u64_sequence(self.last_finalized_sequence.load(Ordering::Acquire))
+        }
+    }
+
+    #[cfg(not(target_has_atomic = "64"))]
+    fn u32_to_u64_sequence(&self, sequence: u32) -> u64 {
+        let first_sequence = self.tail_sequence_internal();
+
+        // The as conversions are done in two steps to first utilize 2's complement to get the
+        // signed difference between the 32-bit version of `first_sequence` and
+        // `sequence`, and then to sign extend from `i32` to `i64`, which would not be
+        // accomplished through a direct `as i64` from `u32` operation.
+        let diff = (first_sequence as u32).wrapping_sub(sequence) as i32;
+        first_sequence.wrapping_sub_signed(diff as i64)
+    }
+
+    #[cfg(not(target_has_atomic = "64"))]
+    fn u64_to_u32_sequence(&self, sequence: u64) -> u32 {
+        sequence as u32
     }
 
     /// Returns the number of bits required to represent an arbitrary position in the data buffer.
@@ -301,6 +365,37 @@ pub struct Descriptor {
     sequence: AtomicU64,
     #[cfg(not(target_has_atomic = "64"))]
     sequence: [AtomicU32; 2],
+}
+
+impl Descriptor {
+    fn sequence_load(&self, order: Ordering) -> u64 {
+        #[cfg(target_has_atomic = "64")]
+        {
+            self.sequence.load(order)
+        }
+        #[cfg(not(target_has_atomic = "64"))]
+        {
+            let lower = u64::from(self.sequence[0].load(order));
+            let upper = u64::from(self.sequence[1].load(order));
+
+            (upper << 32) | lower
+        }
+    }
+
+    fn sequence_store(&self, sequence: u64, order: Ordering) {
+        #[cfg(target_has_atomic = "64")]
+        {
+            self.sequence.store(sequence, order)
+        }
+        #[cfg(not(target_has_atomic = "64"))]
+        {
+            let lower = sequence as u32;
+            let upper = (sequence >> 32) as u32;
+
+            self.sequence[1].store(upper, order);
+            self.sequence[0].store(lower, order);
+        }
+    }
 }
 
 impl AtomicDescriptorStateId {
