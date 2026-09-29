@@ -16,6 +16,8 @@ pub fn configure(config: &mut Config) {
     subproject.disable_host();
     subproject.disable_revm();
 
+    subproject.add_libraries("sync");
+
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         subproject.add_libraries("uefi");
     }

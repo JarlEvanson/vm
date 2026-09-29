@@ -10,6 +10,7 @@ mod uefi;
 
 // Other support modules.
 
+mod interface;
 mod relocation;
 
 #[cfg(target_arch = "aarch64")]
