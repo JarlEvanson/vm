@@ -10,6 +10,8 @@ use uefi::{
     table::system::SystemTable,
 };
 
+mod console;
+
 /// The [`Handle`] representing the image.
 static IMAGE_HANDLE: AtomicPtr<ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 /// The program's UEFI table.
@@ -19,6 +21,7 @@ static UEFI_SYSTEM_TABLE: AtomicPtr<SystemTable> = AtomicPtr::new(ptr::null_mut(
 pub extern "efiapi" fn main(image_handle: Handle, system_table_ptr: *mut SystemTable) -> Status {
     IMAGE_HANDLE.store(image_handle.0, Ordering::Release);
     UEFI_SYSTEM_TABLE.store(system_table_ptr, Ordering::Release);
+    console::register();
 
     Status::SUCCESS
 }
