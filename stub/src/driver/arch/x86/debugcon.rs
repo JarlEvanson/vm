@@ -1,6 +1,61 @@
-use core::{arch::asm, mem, pin::Pin};
+use core::{arch::asm, mem::{self, MaybeUninit}, pin::Pin, sync::atomic::{AtomicBool, AtomicU8, Ordering}};
 
-use crate::platform::{Console, ConsoleInternal, Metadata};
+use sync::ControlledModificationCell;
+
+use crate::{declare_driver, driver::Driver, platform::{Console, ConsoleInternal, Metadata, register_console}};
+
+static DEBUG_CON_DRIVER: DebugConDriver = DebugConDriver;
+declare_driver!(DEBUG_CON_DRIVER);
+
+static DEBUG_CON_INSTANCE_USED: AtomicU8 = AtomicU8::new(0);
+static DEBUG_CON_INSTANCE: ControlledModificationCell<MaybeUninit<DebugCon>> = ControlledModificationCell::new(MaybeUninit::uninit());
+
+struct DebugConDriver;
+
+impl Driver for DebugConDriver {
+    fn driver_name(&self) -> &'static str {
+        "debugcon"
+    }
+
+    fn validate_preparedness(&self, arg: &'static str) -> bool {
+        let Some(port) = arg.strip_prefix("port=0x") else {
+            return false;
+        };
+
+        u16::from_str_radix(port, 16).is_ok()
+    }
+
+    fn connect(&self, arg: &'static str) -> Result<(), ()> {
+        let Some(port) = arg.strip_prefix("port=0x") else {
+            crate::warn!("debugcon requires argument of form 'port=<ADDRESS>'");
+            return Err(());
+        };
+
+        let port = u16::from_str_radix(port, 16).map_err(|_| ())?;
+        let debugcon = DebugCon {
+            port,
+            console_internal: ConsoleInternal::new(),
+        };
+
+        if DEBUG_CON_INSTANCE_USED.compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            // Successfully claimed the `DEBUG_CON_INSTANCE`.
+            
+            // SAFETY:
+            //
+            // `DEBUG_CON_INSTANCE` is claimed and controlled by `DEBUG_CON_INSTANCE_USED`.
+            let debugcon_instance = unsafe { DEBUG_CON_INSTANCE.get_mut() };
+            let debugcon_instance = debugcon_instance.write(debugcon);
+            let debugcon_instance = Pin::static_ref(debugcon_instance);
+            register_console(debugcon_instance);
+
+            DEBUG_CON_INSTANCE_USED.store(2, Ordering::Release);
+        } else {
+            todo!()
+        }
+
+        Ok(())
+    }
+}
 
 pub struct DebugCon {
     pub port: u16,
@@ -40,3 +95,4 @@ unsafe impl Console for DebugCon {
         }
     }
 }
+

@@ -1,8 +1,7 @@
 //! Support for booting from an UEFI platform implementation.
 
 use core::{
-    ffi, ptr,
-    sync::atomic::{AtomicPtr, Ordering},
+    ffi, ptr, slice, sync::atomic::{AtomicPtr, Ordering},
 };
 
 use uefi::{
@@ -10,7 +9,7 @@ use uefi::{
     table::system::SystemTable,
 };
 
-use crate::platform::uefi::cmd_line::acquire_cmdline;
+use crate::{cmd_line::{CommandLineArguments, handle_arguments}, platform::uefi::cmd_line::acquire_cmdline};
 
 mod cmd_line;
 mod console;
@@ -25,6 +24,9 @@ pub extern "efiapi" fn main(image_handle: Handle, system_table_ptr: *mut SystemT
     IMAGE_HANDLE.store(image_handle.0, Ordering::Release);
     UEFI_SYSTEM_TABLE.store(system_table_ptr, Ordering::Release);
     console::register();
+
+    crate::trace!("UEFI Image Handle: {:p}", image_handle.0);
+    crate::trace!("UEFI System Table: {:p}", system_table_ptr);
 
     // SAFETY:
     //
@@ -54,6 +56,26 @@ pub extern "efiapi" fn main(image_handle: Handle, system_table_ptr: *mut SystemT
     };
 
     crate::debug!("{}", cmdline.as_str());
+    let cmdline_str = unsafe {
+        let slice = slice::from_raw_parts(cmdline.as_str().as_ptr(), cmdline.as_str().len());
+        str::from_utf8_unchecked(slice)
+    };
 
+    let cmdline_args = CommandLineArguments::new(cmdline_str);
+
+    for arg in cmdline_args.arguments() {
+        crate::trace!("Arg: {arg}");
+    }
+
+    crate::trace!("REVM Command Line: {}", cmdline_args.revm_command_line());
+
+    if let Err(error) = handle_arguments(cmdline_args) {
+        return Status::LOAD_ERROR;
+    }
+
+    crate::trace!("testing 1 2 3");
+
+    loop {}
+    drop(cmdline);
     Status::SUCCESS
 }

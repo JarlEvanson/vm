@@ -2,6 +2,88 @@
 
 use core::iter::Take;
 
+use crate::{driver::drivers, platform::{LogLevel, set_log_level}};
+
+pub fn handle_arguments<'a>(cmd_line_args: CommandLineArguments<'static>) -> Result<(), ()> {
+    let mut log_level = None;
+
+    let mut args = cmd_line_args.arguments();
+    while let Some(arg) = args.next() {
+        if arg != "--log-level" {
+            continue;
+        }
+
+        let Some(next_arg) = args.next() else {
+            todo!()
+        };
+
+        let level = if next_arg == "trace" {
+            LogLevel::Trace
+        } else if next_arg == "debug" {
+            LogLevel::Debug
+        } else if next_arg == "info" {
+            LogLevel::Info
+        } else if next_arg == "warn" {
+            LogLevel::Warn
+        } else if next_arg == "error" {
+            LogLevel::Error
+        } else {
+            crate::error!("Argument '--log-level' requires argument of form <trace|debug|info|warn|error>'");
+            return Err(());
+        };
+
+        log_level = Some(level);
+    }
+
+    if let Some(log_level) = log_level {
+        set_log_level(log_level);
+    }
+
+    args = cmd_line_args.arguments();
+    'arg_processing_loop: while let Some(arg) = args.next() {
+        if arg == "--log-level" {
+            // Skip it, we've already handled them.
+            let _ = args.next();
+            continue;
+        } else if arg == "--console" {
+            let Some(console_argument) = args.next() else {
+                crate::error!("Argument '--console' requires argument of form <DRIVER=<DRIVER_ARGS>>");
+            return Err(());
+            };
+
+            let Some((name, arg)) = console_argument.split_once('=') else {
+                crate::error!("Argument '--console' requires argument of form <DRIVER=<DRIVER_ARGS>>");
+            return Err(());
+            };
+
+            for driver in drivers() {
+                if name != driver.driver_name() {
+                    continue;
+                }
+
+                if !driver.validate_preparedness(arg) {
+                    crate::debug!("{name} is not prepared for initialization with {arg}");
+                    continue 'arg_processing_loop;
+                }
+
+                if let Err(()) = driver.connect(arg) {
+                    crate::error!("failed to initialize device using {name} with args: {arg}");
+                    continue 'arg_processing_loop;
+                }
+
+                continue 'arg_processing_loop;
+            }
+
+            crate::error!("unrecognized driver name: {name}");
+        } else {
+            crate::error!("unexpected argument: {arg:?}");
+            return Err(());
+        }
+    }
+
+    Ok(())
+}
+
 /// Parsed representation of the provided command line, with special handling for the command line
 /// to be passed to `revm`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +124,7 @@ impl<'a> CommandLineArguments<'a> {
     pub fn arguments(&self) -> CommandLineArgumentsIter<'a> {
         CommandLineArgumentsIter(
             self.arguments_internal()
-                .take(self.revm_arguments_start.unwrap_or(usize::MAX)),
+                .take(self.revm_arguments_start.map(|i| i.saturating_sub(1)).unwrap_or(usize::MAX)),
         )
     }
 

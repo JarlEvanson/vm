@@ -5,10 +5,13 @@
 mod cmd_line;
 mod driver;
 mod platform;
+mod util;
 
 /// Generic handler for panics.
 #[cfg(not(test))]
 #[panic_handler]
-fn panic_handler(_: &core::panic::PanicInfo) -> ! {
+fn panic_handler(info: &core::panic::PanicInfo) -> ! {
+    crate::error!("{info}");
+
     loop {}
 }
