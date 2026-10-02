@@ -17,6 +17,7 @@ pub fn configure(config: &mut Config) {
     subproject.disable_revm();
 
     subproject.add_libraries("sync");
+    subproject.add_libraries("conversion");
 
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         subproject.add_libraries("uefi");
