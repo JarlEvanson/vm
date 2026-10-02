@@ -2,6 +2,7 @@
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(not(test), no_main)]
 
+mod cmd_line;
 mod driver;
 mod platform;
 
