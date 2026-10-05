@@ -4,7 +4,20 @@
 
 mod cmd_line;
 mod driver;
+mod graph;
 mod platform;
+mod util;
+
+define_node!(
+    TEST_NODE,
+    "Test",
+    active,
+    type = (),
+    required = [],
+    required_by = [],
+    wanted = [],
+    wanted_by = []
+);
 
 /// Generic handler for panics.
 #[cfg(not(test))]
