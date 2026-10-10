@@ -19,5 +19,17 @@ pub fn configure(config: &mut Config) {
     binary_target.add_dependency("core");
     binary_target.add_dependency("compiler-builtins");
 
+    if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
+        binary.add_dependency("uefi");
+    }
+
+    if !config.kconfig.contains_key("CONFIG_STUB_PLATFORMS_VALID") {
+        eprintln!("=========================================================");
+        eprintln!("ERROR: Configuration validation failed!");
+        eprintln!("You must select at least one boot platform for revm-stub.");
+        eprintln!("=========================================================");
+        std::process::exit(1)
+    }
+
     config.add_subproject(Subproject::new_binary("revm-stub", binary));
 }
