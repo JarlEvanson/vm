@@ -17,5 +17,7 @@ pub fn configure(config: &mut Config) {
     let binary_target = binary.binary_target_mut(Target::RevmStub);
     binary_target.set_linker_script(subproject_path.join("linker-script.ld"));
 
+    binary.add_dependency("sync");
+
     config.add_subproject(Subproject::new_binary("revm-stub", binary));
 }
