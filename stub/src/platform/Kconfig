@@ -1,0 +1,11 @@
+menu "Platforms"
+
+config STUB_PLATFORM_UEFI
+    bool "Enable booting from UEFI"
+
+config STUB_PLATFORMS_VALID
+    bool
+    default y
+    depends on STUB_PLATFORM_UEFI
+
+endmenu
