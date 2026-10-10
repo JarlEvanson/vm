@@ -19,6 +19,8 @@ pub fn configure(config: &mut Config) {
     binary_target.add_dependency("core");
     binary_target.add_dependency("compiler-builtins");
 
+    binary.add_dependency("sync");
+
     if config.kconfig.contains_key("CONFIG_STUB_PLATFORM_UEFI") {
         binary.add_dependency("uefi");
     }

@@ -10,7 +10,10 @@ mod uefi;
 
 // Other support modules.
 
+mod interface;
 mod relocation;
+
+pub use interface::*;
 
 #[cfg(target_arch = "aarch64")]
 core::arch::global_asm! {
