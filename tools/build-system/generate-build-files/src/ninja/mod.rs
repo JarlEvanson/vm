@@ -48,6 +48,7 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     add_miri_builds(&mut file, config, &miri_sysroot);
     add_miri_unit_test_builds(&mut file, config, &miri_sysroot);
 
+    add_package_build(&mut file, config);
     add_regenerate_build(&mut file, config);
 
     // Add the `ALWAYS` build to enable executing something whenever it is part of the execution
@@ -57,6 +58,7 @@ pub fn generate(output: &mut Vec<u8>, config: &Config) {
     file.add_build(always);
 
     file.add_default(FilePath::from_literal("build-tools"));
+    file.add_default(FilePath::from_literal("package"));
 
     file.write_out(output);
 }
@@ -1454,6 +1456,48 @@ fn add_miri_unit_test_builds(file: &mut NinjaFile, config: &Config, miri_sysroot
     }
 
     file.add_build(execute_unit_tests);
+}
+
+/// Adds a [`Build`] statement that packages `revm` and `revm-stub` into a single binary.
+fn add_package_build(file: &mut NinjaFile, config: &Config) {
+    let mut build_package = Build::new("execute");
+
+    let mut packager_path = config.cli.build_dir_path.join("tools");
+    packager_path.push("package");
+
+    let mut revm_path = config.cli.build_dir_path.join(Target::Revm.folder());
+    revm_path.push("rustc");
+    revm_path.push("revm");
+
+    let mut revm_stub_path = config.cli.build_dir_path.join(Target::RevmStub.folder());
+    revm_stub_path.push("rustc");
+    revm_stub_path.push("revm_stub");
+
+    let packaged_path = config.cli.out_dir_path.join("revm");
+
+    build_package.add_input(FilePath::from_path(&packager_path));
+    build_package.add_input(FilePath::from_path(&revm_path));
+    build_package.add_input(FilePath::from_path(&revm_stub_path));
+    build_package.add_output(FilePath::from_path(&packaged_path));
+
+    let mut binary = Variable::new("binary");
+    binary.push_escaped_argument(&Argument::new_path(&packager_path));
+    build_package.add_variable(binary);
+
+    let mut args = Variable::new("args");
+    args.push_escaped_argument(&Argument::new_path(&revm_stub_path));
+    args.push_escaped_str(" ");
+    args.push_escaped_argument(&Argument::new_path(&revm_path));
+    args.push_escaped_str(" ");
+    args.push_escaped_argument(&Argument::new_path(&packaged_path));
+    build_package.add_variable(args);
+
+    file.add_build(build_package);
+
+    let mut package = Build::new("phony");
+    package.add_output(FilePath::from_literal("package"));
+    package.add_input(FilePath::from_path(&packaged_path));
+    file.add_build(package);
 }
 
 /// Adds a [`Build`] statement that regenerates the `build.ninja` file to mitigate out of date
