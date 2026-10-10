@@ -6,5 +6,6 @@
 // Other support modules.
 
 mod interface;
+mod relocation;
 
 pub use interface::*;
