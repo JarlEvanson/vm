@@ -1,11 +1,18 @@
 menu "Platforms"
 
+config STUB_PLATFORM_LINUX
+    bool "Enable booting using the Linux boot protocol"
+    select STUB_DEVICE_TREE
+
 config STUB_PLATFORM_UEFI
     bool "Enable booting from UEFI"
 
 config STUB_PLATFORMS_VALID
     bool
     default y
-    depends on STUB_PLATFORM_UEFI
+    depends on STUB_PLATFORM_LINUX || STUB_PLATFORM_UEFI
+
+config STUB_DEVICE_TREE
+    bool
 
 endmenu
