@@ -9,6 +9,8 @@ mod compiler_builtins;
 mod format;
 #[path = "misc/configure.rs"]
 mod misc;
+#[path = "platform/configure.rs"]
+mod platform;
 
 pub fn configure(config: &mut Config) {
     core_configure(config);
@@ -16,6 +18,7 @@ pub fn configure(config: &mut Config) {
     compiler_builtins::configure(config);
     format::configure(config);
     misc::configure(config);
+    platform::configure(config);
 }
 
 fn core_configure(config: &mut Config) {
