@@ -16,6 +16,7 @@ pub fn configure(config: &mut Config) {
 
     binary.add_dependency("conversion");
     binary.add_dependency("elf");
+    binary.add_dependency("linux");
     binary.add_dependency("pe");
 
     let subproject = Subproject::new_binary("package", binary);
