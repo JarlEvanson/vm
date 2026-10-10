@@ -77,4 +77,6 @@ endchoice
 
 endmenu
 
+source stub/src/platform/Kconfig
+
 endmenu
