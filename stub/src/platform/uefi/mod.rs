@@ -16,6 +16,8 @@ use crate::{
     platform::{self, BootProtocol},
 };
 
+mod console;
+
 /// The [`Handle`] representing the image.
 static IMAGE_HANDLE: AtomicPtr<ffi::c_void> = AtomicPtr::new(ptr::null_mut());
 /// The program's UEFI table.
