@@ -22,5 +22,9 @@ pub extern "efiapi" fn main(image_handle: Handle, system_table_ptr: *mut SystemT
     IMAGE_HANDLE.store(image_handle.0, Ordering::Release);
     UEFI_SYSTEM_TABLE.store(system_table_ptr, Ordering::Release);
 
+    console::register();
+    crate::trace!("UEFI Console Registered");
+
+    console::deregister();
     Status::SUCCESS
 }
