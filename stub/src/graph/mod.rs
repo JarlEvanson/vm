@@ -1,6 +1,6 @@
 //! Implementation of a graph-based initialization routine.
 
-use core::ptr::{self, NonNull};
+use core::ptr;
 
 use crate::{
     graph::{linked_list::LinkedList, node::State},
@@ -12,14 +12,21 @@ mod node;
 
 pub use node::{GraphNode, Internal, Reference};
 
-/// Converts the provided list of [`SendSyncNonNull<Internal>`]s into a list of [`Internal`]s.
-fn internal_iter<'a>(
-    graph: &'a [SendSyncNonNull<Internal<'a>>],
-) -> impl Iterator<Item = (NonNull<Internal<'a>>, &'a Internal<'a>)> + Clone {
-    graph.iter().map(|ptr| {
-        let internal_ptr = ptr.0;
-        (ptr.0, unsafe { internal_ptr.as_ref() })
-    })
+/// An [`Iterator`] over the [`GraphNode`]s.
+#[derive(Clone)]
+struct GraphNodeIter<'nodes>(&'nodes [SendSyncNonNull<Internal<'nodes>>]);
+
+impl<'nodes> Iterator for GraphNodeIter<'nodes> {
+    type Item = &'nodes Internal<'nodes>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let internal_ptr = self.0.first()?;
+        self.0 = &self.0[1..];
+        // SAFETY:
+        //
+        // The provided ist is correct since this is a constrained module.
+        unsafe { Some(internal_ptr.0.as_ref()) }
+    }
 }
 
 /// Initializes the [`LinkedList`]s of required and wants [`Internal`]s.
@@ -27,27 +34,25 @@ fn internal_iter<'a>(
 /// # Safety
 ///
 /// - All [`SendSyncPointer`]s provided in `graph` must be under the exclusive control of this
-///   [`initialize()`] call.
+///   [`initialize_internal()`] call.
 /// - All [`Internal`]s must have all of their referenced [`GraphNode`]s be under the exclusive
-///   control of this [`initialize()`] call.
-unsafe fn initialize<'a>(
-    graph: impl Iterator<Item = (NonNull<Internal<'a>>, &'a Internal<'a>)> + Clone,
-) {
-    for (_, node) in graph.clone() {
+///   control of this [`initialize_internal()`] call.
+unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
+    for node in graph.clone() {
         // SAFETY:
         //
         // The invariants of this function ensure that this operation is safe.
         unsafe { node.link.get_mut().set_value(Some(node)) }
     }
 
-    for (_, node) in graph {
+    for node in graph {
         // SAFETY:
         //
         // The invariants of this function ensure that this operation is safe.
         let runtime_info = unsafe { node.runtime_init.get_mut() };
 
         for (&required, link) in node.required.iter().zip(runtime_info.required_links.iter()) {
-            assert_eq!(
+            assert_ne!(
                 ptr::from_ref(required),
                 ptr::from_ref(node),
                 "a node must not require itself"
@@ -67,7 +72,7 @@ unsafe fn initialize<'a>(
             .iter()
             .zip(runtime_info.required_by_links.iter())
         {
-            assert_eq!(
+            assert_ne!(
                 ptr::from_ref(required_by),
                 ptr::from_ref(node),
                 "a node must not be required by itself"
@@ -92,7 +97,7 @@ unsafe fn initialize<'a>(
         }
 
         for (&wanted, link) in node.wanted.iter().zip(runtime_info.wanted_links.iter()) {
-            assert_eq!(
+            assert_ne!(
                 ptr::from_ref(wanted),
                 ptr::from_ref(node),
                 "a node must not require itself"
@@ -112,7 +117,7 @@ unsafe fn initialize<'a>(
             .iter()
             .zip(runtime_info.wanted_by_links.iter())
         {
-            assert_eq!(
+            assert_ne!(
                 ptr::from_ref(wanted_by),
                 ptr::from_ref(node),
                 "a node must not be wanted by itself"
@@ -133,17 +138,21 @@ unsafe fn initialize<'a>(
 }
 
 /// Runs an execution graph until the target `node` is executed.
-fn run_internal<'a>(
-    graph: impl Iterator<Item = (NonNull<Internal<'a>>, &'a Internal<'a>)> + Clone,
-    node: &'a Internal<'a>,
-) {
+///
+/// # Safety
+///
+/// - All [`SendSyncPointer`]s provided in `graph` must be under the exclusive control of this
+///   [`startup_internal()`] call.
+/// - All [`Internal`]s must have all of their referenced [`GraphNode`]s be under the exclusive
+///   control of this [`startup_internal()`] call.
+unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>) {
     assert_ne!(
         node.state(),
         State::Disabled,
         "disabled nodes must not be executed"
     );
 
-    for (_, node) in graph.clone() {
+    for node in graph.clone() {
         assert_ne!(
             node.state(),
             State::WaitingForProcessing,
@@ -197,7 +206,7 @@ fn run_internal<'a>(
 
     // Gather all nodes that should be run in a single list.
     let mut node_count = 0;
-    for (_, node) in graph.clone() {
+    for node in graph.clone() {
         if node.state() != State::WaitingForProcessing {
             continue;
         }
@@ -236,9 +245,141 @@ fn run_internal<'a>(
             }
         }
 
-        todo!("implement node execution");
+        match node.startup() {
+            Ok(()) => node.set_state(State::Active),
+            Err(()) => node.set_state(State::Failed),
+        }
 
         loops_since_last_execution = 0;
         node_count -= 1;
+    }
+}
+
+/// Shuts down an execution graph.
+///
+/// # Safety
+///
+/// - All [`SendSyncPointer`]s provided in `graph` must be under the exclusive control of this
+///   [`shutdown_internal()`] call.
+/// - All [`Internal`]s must have all of their referenced [`GraphNode`]s be under the exclusive
+///   control of this [`shutdown_internal()`] call.
+unsafe fn shutdown_internal<'a>(graph: GraphNodeIter<'a>) {
+    for node in graph.clone() {
+        assert_ne!(
+            node.state(),
+            State::WaitingForProcessing,
+            "partially complete runs are not supported"
+        );
+    }
+
+    let mut queue = LinkedList::new();
+    
+    let mut node_count = 0;
+    for node in graph.clone() {
+        if !matches!(node.state(), State::Active) {
+            continue;
+        }
+
+        queue.push_back(&node.link);
+        node_count += 1;
+    }
+
+    while let Some(node) = queue.pop_front() {
+        let node = node.get().value();
+        assert_ne!(node.state(), State::WaitingForProcessing);
+
+        if loops_since_last_execution == node_count {
+            unreachable!("cycle in execution graph");
+        }
+    }
+
+    todo!()
+}
+
+#[cfg(test)]
+mod test {
+    use core::{
+        ptr::NonNull,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use crate::{
+        define_node,
+        graph::{GraphNodeIter, Internal, initialize_internal, startup_internal},
+        util::SendSyncNonNull,
+    };
+
+    #[test]
+    fn graph_startup_works() {
+        static A: AtomicUsize = AtomicUsize::new(0);
+
+        define_node!(
+            NODE_A,
+            "NODE A",
+            active = true,
+            type = (),
+            startup = a_startup,
+            shutdown = a_shutdown,
+            required = [],
+            required_by = [],
+            wanted = [],
+            wanted_by = [],
+        );
+
+        fn a_startup() -> Result<(), ()> {
+            assert_eq!(A.fetch_add(1, Ordering::Relaxed), 0);
+            Ok(())
+        }
+
+        fn a_shutdown(_: ()) -> Result<(), ()> {
+            assert_eq!(A.fetch_sub(1, Ordering::Relaxed), 1);
+            Ok(())
+        }
+
+        define_node!(
+            NODE_B,
+            "NODE B",
+            active = true,
+            type = bool,
+            startup = b_startup,
+            required = [NODE_A],
+            required_by = [],
+            wanted = [],
+            wanted_by = [],
+        );
+
+        fn b_startup() -> Result<bool, ()> {
+            let _ = A.fetch_add(1, Ordering::Relaxed);
+            Ok(true)
+        }
+
+        define_node!(
+            NODE_C,
+            "NODE C",
+            active = true,
+            type = (),
+            startup = c_startup,
+            required = [NODE_B],
+            required_by = [],
+            wanted = [],
+            wanted_by = [],
+        );
+
+        fn c_startup() -> Result<(), ()> {
+            let _ = A.fetch_sub(1, Ordering::Relaxed);
+            assert_eq!(*NODE_B.ref_data().unwrap(), true);
+            Ok(())
+        }
+
+        static NODES: [SendSyncNonNull<Internal>; 3] = [
+            SendSyncNonNull(NonNull::from_ref(&NODE_A.internal)),
+            SendSyncNonNull(NonNull::from_ref(&NODE_B.internal)),
+            SendSyncNonNull(NonNull::from_ref(&NODE_C.internal)),
+        ];
+
+        let iter = GraphNodeIter(&NODES);
+
+        unsafe { initialize_internal(iter.clone()) };
+        unsafe { startup_internal(iter, &NODE_C.internal) }
     }
 }

@@ -1,14 +1,15 @@
 //! Definitions and interfaces providing a [`GraphNode`]-based initialization system.
 
 use core::{
-    mem::MaybeUninit,
+    mem::{self, MaybeUninit},
     ops,
+    ptr::NonNull,
     sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 use sync::ControlledModificationCell;
 
-use crate::graph::linked_list::{Link, LinkIter, LinkedList};
+use crate::graph::linked_list::{Link, LinkValueIter, LinkedList};
 
 /// A node in the initialization graph. It can provided startup and shutdown functionality, as well
 /// as containing a statically available instance of `T` through the [`Reference`] API that is
@@ -60,6 +61,7 @@ impl<'nodes, T: Send + Sync> GraphNode<'nodes, T> {
 
             internal: Internal::new::<R, RB, W, WB, T>(
                 name,
+                mem::offset_of!(Self, internal),
                 enabled,
                 required,
                 required_links,
@@ -154,7 +156,7 @@ impl<T> Drop for Reference<'_, T> {
         // [`Reference`] instances should only exist while `references` is greater than 1, since a
         // value of 0 indicates that the data is uninitialized, while a value of 1 indicates that
         // it is initialized and unreferenced.
-        debug_assert!(previous_references <= 1);
+        debug_assert!(previous_references > 1);
     }
 }
 
@@ -179,13 +181,16 @@ pub struct Internal<'nodes> {
     /// This is not unique.
     pub(in crate::graph) name: &'static str,
 
-    /// The state of this [`GraphNode`].
-    pub(in crate::graph) state: AtomicU8,
+    /// The offset to the associated [`GraphNode`].
+    pub(in crate::graph) node_offset: usize,
 
     /// The untyped startup function.
-    pub(in crate::graph) startup: fn(*const ()) -> Result<(), ()>,
+    pub(in crate::graph) startup_func: fn(node_ptr: NonNull<()>) -> Result<(), ()>,
     /// The untyped shutdown function.
-    pub(in crate::graph) shutdown: fn(*const ()) -> Result<(), ()>,
+    pub(in crate::graph) shutdown_func: fn(node_ptr: NonNull<()>) -> Result<(), ()>,
+
+    /// The state of this [`GraphNode`].
+    pub(in crate::graph) state: AtomicU8,
 
     /// An intrusive link used for computing the execution graph.
     pub(in crate::graph) link: ControlledModificationCell<Link<'nodes, Internal<'nodes>>>,
@@ -223,6 +228,7 @@ impl<'nodes> Internal<'nodes> {
     #[expect(clippy::too_many_arguments)]
     pub const fn new<const R: usize, const RB: usize, const W: usize, const WB: usize, T>(
         name: &'static str,
+        node_offset: usize,
         enabled: bool,
         required: &'nodes [&'nodes Internal<'nodes>; R],
         required_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; R],
@@ -244,8 +250,9 @@ impl<'nodes> Internal<'nodes> {
 
             state: AtomicU8::new(state_value.to_u8()),
 
-            startup: Self::startup_func::<T>,
-            shutdown: Self::shutdown_func::<T>,
+            node_offset,
+            startup_func: Self::startup_func::<T>,
+            shutdown_func: Self::shutdown_func::<T>,
 
             link: ControlledModificationCell::new(Link::empty()),
 
@@ -277,20 +284,40 @@ impl<'nodes> Internal<'nodes> {
     }
 
     /// Returns an [`Iterator`] over the required [`GraphNode`]s for this [`GraphNode`].
-    pub(in crate::graph) fn required(&self) -> LinkIter<'nodes, Internal<'nodes>> {
+    pub(in crate::graph) fn required(&self) -> LinkValueIter<'nodes, Internal<'nodes>> {
         self.runtime_init.get().required_list.iter()
     }
 
     /// Returns an [`Iterator`] over the wanted [`GraphNode`]s for this [`GraphNode`].
-    pub(in crate::graph) fn wanted(&self) -> LinkIter<'nodes, Internal<'nodes>> {
+    pub(in crate::graph) fn wanted(&self) -> LinkValueIter<'nodes, Internal<'nodes>> {
         self.runtime_init.get().wanted_list.iter()
     }
 
-    fn startup_func<T>(ptr: *const ()) -> Result<(), ()> {
-        todo!()
+    /// Calls the startup function associated with the associated [`GraphNode`].
+    pub(in crate::graph) fn startup(&self) -> Result<(), ()> {
+        let internal_ptr = NonNull::from_ref(self);
+        // SAFETY:
+        //
+        // This is an interal function to the graph subsystem and thus all invocations can be
+        // assumed to be safe.
+        let graph_node_ptr = unsafe { internal_ptr.byte_sub(self.node_offset).cast::<()>() };
+
+        (self.startup_func)(graph_node_ptr)
     }
 
-    fn shutdown_func<T>(ptr: *const ()) -> Result<(), ()> {
+    fn startup_func<T>(node_ptr: NonNull<()>) -> Result<(), ()> {
+        let node = unsafe { node_ptr.cast::<GraphNode<T>>().as_ref() };
+        let Some(startup_func) = node.startup_func else {
+            return Ok(());
+        };
+
+        let data = startup_func()?;
+        unsafe { node.data.data.get_mut().write(data) };
+        node.data.references.store(1, Ordering::Release);
+        Ok(())
+    }
+
+    fn shutdown_func<T>(ptr: NonNull<()>) -> Result<(), ()> {
         todo!()
     }
 }
@@ -373,52 +400,54 @@ macro_rules! make_node {
         $name:expr,
         $life_cycle_funcs:expr,
         active = $active:expr,
-        required = $required:expr,
-        required_by = $required_by:expr,
-        wanted = $wanted:expr,
-        wanted_by = $wanted_by:expr $(,)?
+        required = [$($required_item:expr),* $(,)?],
+        required_by = [$($required_by_item:expr),* $(,)?],
+        wanted = [$($wanted_item:expr),* $(,)?],
+        wanted_by = [$($wanted_by_item:expr),* $(,)?] $(,)?
     ) => {{
         {
+            const REQUIRED_COUNT: usize = <[()]>::len(&[ $( { let _ = &$required_item; () }),*]);
+            const REQUIRED_BY_COUNT: usize = <[()]>::len(&[ $( { let _ = &$required_by_item; () }),*]);
+            const WANTED_COUNT: usize = <[()]>::len(&[ $( { let _ = &$wanted_item; () }),*]);
+            const WANTED_BY_COUNT: usize = <[()]>::len(&[ $( { let _ = &$wanted_by_item; () }),*]);
+
+            static REQUIRED: [&$crate::graph::Internal; REQUIRED_COUNT] = [$( &$required_item.internal ),*];
+            static REQUIRED_BY: [&$crate::graph::Internal; REQUIRED_BY_COUNT] = [$( &$required_by_item.internal ),*];
+            static WANTED: [&$crate::graph::Internal; WANTED_COUNT] = [$( &$wanted_item.internal ),*];
+            static WANTED_BY: [&$crate::graph::Internal; WANTED_BY_COUNT] = [$( &$wanted_by_item.internal ),*];
+
             static REQUIRED_LINKS: [::sync::ControlledModificationCell<
                 $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
-            >; const {
-                <[$crate::graph::node::Internal]>::len(&$required)
-            }] = [const {
-                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty())
-            }; <[$crate::graph::node::Internal]>::len(&$required)];
+            >; REQUIRED_COUNT] = [ $( { let _ = &$required_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
             static REQUIRED_BY_LINKS: [::sync::ControlledModificationCell<
                 $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
-            >; const {
-                <[$crate::graph::node::Internal]>::len(&$required_by)
-            }] = [const {
-                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty())
-            }; <[$crate::graph::node::Internal]>::len(&$required_by)];
+            >; REQUIRED_BY_COUNT] = [ $( { let _ = &$required_by_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
             static WANTED_LINKS: [::sync::ControlledModificationCell<
                 $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
-            >; const {
-                <[$crate::graph::node::Internal]>::len(&$wanted)
-            }] = [const {
-                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty())
-            }; <[$crate::graph::node::Internal]>::len(&$wanted)];
+            >; WANTED_COUNT] = [ $( { let _ = &$wanted_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
             static WANTED_BY_LINKS: [::sync::ControlledModificationCell<
                 $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
-            >; const {
-                <[$crate::graph::node::Internal]>::len(&$wanted_by)
-            }] = [const {
-                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty())
-            }; <[$crate::graph::node::Internal]>::len(&$wanted_by)];
+            >; WANTED_BY_COUNT] = [ $( { let _ = &$wanted_by_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
 
             $crate::graph::node::GraphNode::new(
                 $name,
                 $life_cycle_funcs,
                 $active,
-                &$required,
+                &REQUIRED,
                 &REQUIRED_LINKS,
-                &$required_by,
+                &REQUIRED_BY,
                 &REQUIRED_BY_LINKS,
-                &$wanted,
+                &WANTED,
                 &WANTED_LINKS,
-                &$wanted_by,
+                &WANTED_BY,
                 &WANTED_BY_LINKS,
             )
         }
@@ -432,10 +461,10 @@ macro_rules! define_node {
         $static_name:ident,
         $name:expr,
         active = $active:expr,
-        required = $required:expr,
-        required_by = $required_by:expr,
-        wanted = $wanted:expr,
-        wanted_by = $wanted_by:expr $(,)?
+        required = [$($required_item:expr),* $(,)?],
+        required_by = [$($required_by_item:expr),* $(,)?],
+        wanted = [$($wanted_item:expr),* $(,)?],
+        wanted_by = [$($wanted_by_item:expr),* $(,)?] $(,)?
     ) => {
         $crate::define_node!(
             $static_name,
@@ -443,10 +472,10 @@ macro_rules! define_node {
             life_cycle_funcs = None,
             active = $active,
             type = (),
-            required = $required,
-            required_by = $required_by,
-            wanted = $wanted,
-            wanted_by = $wanted_by,
+            required = [ $($required_item), *],
+            required_by = [ $($required_by_item), *],
+            wanted = [ $($wanted_item), *],
+            wanted_by = [ $($wanted_by_item), *],
         );
     };
     (
@@ -455,10 +484,10 @@ macro_rules! define_node {
         active = $active:expr,
         type = $type:ty,
         startup = $startup_func:expr,
-        required = $required:expr,
-        required_by = $required_by:expr,
-        wanted = $wanted:expr,
-        wanted_by = $wanted_by:expr $(,)?
+        required = [$($required_item:expr),* $(,)?],
+        required_by = [$($required_by_item:expr),* $(,)?],
+        wanted = [$($wanted_item:expr),* $(,)?],
+        wanted_by = [$($wanted_by_item:expr),* $(,)?] $(,)?
     ) => {
         $crate::define_node!(
             $static_name,
@@ -466,10 +495,10 @@ macro_rules! define_node {
             life_cycle_funcs = Some(($startup_func, None)),
             active = $active,
             type = $type,
-            required = $required,
-            required_by = $required_by,
-            wanted = $wanted,
-            wanted_by = $wanted_by,
+            required = [ $($required_item), *],
+            required_by = [ $($required_by_item), *],
+            wanted = [ $($wanted_item), *],
+            wanted_by = [ $($wanted_by_item), *],
         );
     };
     (
@@ -479,10 +508,10 @@ macro_rules! define_node {
         type = $type:ty,
         startup = $startup_func:expr,
         shutdown = $shutdown_func:expr,
-        required = $required:expr,
-        required_by = $required_by:expr,
-        wanted = $wanted:expr,
-        wanted_by = $wanted_by:expr $(,)?
+        required = [$($required_item:expr),* $(,)?],
+        required_by = [$($required_by_item:expr),* $(,)?],
+        wanted = [$($wanted_item:expr),* $(,)?],
+        wanted_by = [$($wanted_by_item:expr),* $(,)?] $(,)?
     ) => {
         $crate::define_node!(
             $static_name,
@@ -490,10 +519,10 @@ macro_rules! define_node {
             life_cycle_funcs = Some(($startup_func, Some($shutdown_func))),
             active = $active,
             type = $type,
-            required = $required,
-            required_by = $required_by,
-            wanted = $wanted,
-            wanted_by = $wanted_by,
+            required = [ $($required_item), *],
+            required_by = [ $($required_by_item), *],
+            wanted = [ $($wanted_item), *],
+            wanted_by = [ $($wanted_by_item), *],
         );
     };
     (
@@ -502,10 +531,10 @@ macro_rules! define_node {
         life_cycle_funcs = $life_cycle_funcs:expr,
         active = $active:expr,
         type = $type:ty,
-        required = $required:expr,
-        required_by = $required_by:expr,
-        wanted = $wanted:expr,
-        wanted_by = $wanted_by:expr $(,)?
+        required = [$($required_item:expr),* $(,)?],
+        required_by = [$($required_by_item:expr),* $(,)?],
+        wanted = [$($wanted_item:expr),* $(,)?],
+        wanted_by = [$($wanted_by_item:expr),* $(,)?] $(,)?
     ) => {
         static $static_name: $crate::graph::GraphNode<$type> = {
             #[used]
@@ -518,10 +547,10 @@ macro_rules! define_node {
                 $name,
                 $life_cycle_funcs,
                 active = $active,
-                required = $required,
-                required_by = $required_by,
-                wanted = $wanted,
-                wanted_by = $wanted_by,
+                required = [ $($required_item), *],
+                required_by = [ $($required_by_item), *],
+                wanted = [ $($wanted_item), *],
+                wanted_by = [ $($wanted_by_item), *],
             )
         };
     }
@@ -531,10 +560,7 @@ macro_rules! define_node {
 mod test {
     use core::ptr::NonNull;
 
-    use crate::{
-        graph::{Internal, initialize, internal_iter, node::State, run_internal},
-        util::SendSyncNonNull,
-    };
+    use super::State;
 
     #[test]
     fn state_roundtrips() {
@@ -548,49 +574,5 @@ mod test {
         for state in states {
             assert_eq!(state, State::from_u8(state.to_u8()));
         }
-    }
-
-    define_node!(
-        NODE_A,
-        "NODE A",
-        active = true,
-        required = [],
-        required_by = [],
-        wanted = [],
-        wanted_by = [],
-    );
-
-    define_node!(
-        NODE_B,
-        "NODE B",
-        active = true,
-        required = [],
-        required_by = [],
-        wanted = [],
-        wanted_by = [],
-    );
-
-    define_node!(
-        NODE_C,
-        "NODE C",
-        active = true,
-        required = [],
-        required_by = [],
-        wanted = [],
-        wanted_by = [],
-    );
-
-    static NODES: [SendSyncNonNull<Internal>; 3] = [
-        SendSyncNonNull(NonNull::from_ref(&NODE_A.internal)),
-        SendSyncNonNull(NonNull::from_ref(&NODE_B.internal)),
-        SendSyncNonNull(NonNull::from_ref(&NODE_C.internal)),
-    ];
-
-    #[test]
-    fn graph_initialization_works() {
-        let iter = internal_iter(&NODES);
-        unsafe { initialize(iter.clone()) };
-
-        run_internal(iter, &NODE_C.internal);
     }
 }

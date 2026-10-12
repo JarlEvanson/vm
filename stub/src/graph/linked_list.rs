@@ -59,44 +59,43 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
     }
 
     /// Returns an [`Iterator`] over the [`Link`]s in the [`LinkedList`].
-    pub(in crate::graph) fn iter(&self) -> LinkIter<'a, T> {
+    pub(in crate::graph) fn link_iter(&self) -> LinkIter<'a, T> {
         LinkIter {
             current_link: self.head,
         }
     }
-}
 
-impl<'a, T: ?Sized> IntoIterator for LinkedList<'a, T> {
-    type Item = &'a T;
-    type IntoIter = LinkIter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
+    /// Returns an [`Iterator`] over the values in the [`LinkedList`].
+    pub(in crate::graph) fn iter(&self) -> LinkValueIter<'a, T> {
+        LinkValueIter(self.link_iter())
     }
 }
 
-impl<'a, T: ?Sized> IntoIterator for &LinkedList<'a, T> {
-    type Item = &'a T;
-    type IntoIter = LinkIter<'a, T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-/// An [`Iterator`] over a singly linked list of values.
+/// An [`Iterator`] over the [`Link`]s in a [`LinkedList`].
 pub(in crate::graph) struct LinkIter<'a, T: ?Sized> {
     /// The current [`Link`] in the list.
     current_link: Option<&'a ControlledModificationCell<Link<'a, T>>>,
 }
 
 impl<'a, T: ?Sized> Iterator for LinkIter<'a, T> {
+    type Item = &'a ControlledModificationCell<Link<'a, T>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_link = self.current_link?;
+        self.current_link = current_link.get().next;
+        Some(current_link)
+    }
+}
+
+/// An [`Iterator`] over the values in a [`LinkedList`].
+pub(in crate::graph) struct LinkValueIter<'a, T: ?Sized>(LinkIter<'a, T>);
+
+impl<'a, T: ?Sized> Iterator for LinkValueIter<'a, T> {
     type Item = &'a T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let current_link = self.current_link?.get();
-        self.current_link = current_link.next;
-        current_link.value
+        let link = self.0.next()?;
+        Some(link.get().value())
     }
 }
 
@@ -142,7 +141,7 @@ mod test {
 
     #[derive(Debug)]
     struct Value<'a> {
-        value: usize,
+        _value: usize,
 
         link: ControlledModificationCell<Link<'a, Value<'a>>>,
     }
@@ -150,7 +149,7 @@ mod test {
     impl<'a> Value<'a> {
         const fn new(value: usize) -> Self {
             Self {
-                value,
+                _value: value,
                 link: ControlledModificationCell::new(Link::empty()),
             }
         }
@@ -160,7 +159,7 @@ mod test {
     fn empty_list() {
         let mut list = LinkedList::<u8>::new();
         assert!(list.pop_front().is_none());
-        assert_eq!(list.into_iter().next(), None);
+        assert_eq!(list.iter().next(), None);
     }
 
     #[test]
@@ -170,8 +169,8 @@ mod test {
         let mut list = LinkedList::new();
         list.push_back(&value.link);
 
-        for iter_value in list.iter() {
-            assert_eq!(ptr::from_ref(&iter_value.link), ptr::from_ref(&value.link));
+        for link in list.link_iter() {
+            assert_eq!(ptr::from_ref(link), ptr::from_ref(&value.link));
         }
 
         let popped = list.pop_front().unwrap();
@@ -191,8 +190,8 @@ mod test {
         list.push_back(&value_0.link);
         list.push_back(&value_1.link);
 
-        for (iter_value, value) in list.iter().zip(values) {
-            assert_eq!(ptr::from_ref(&iter_value.link), ptr::from_ref(&value.link));
+        for (link, value) in list.link_iter().zip(values) {
+            assert_eq!(ptr::from_ref(link), ptr::from_ref(&value.link));
         }
 
         let popped_0 = list.pop_front().unwrap();
