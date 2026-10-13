@@ -315,6 +315,16 @@ impl<'nodes> Internal<'nodes> {
         self.runtime_init.get().wanted_list.iter()
     }
 
+    /// Returns an [`Iterator`] over the required [`GraphNode`]s for this [`GraphNode`].
+    pub(in crate::graph) fn rev_required(&self) -> LinkValueIter<'nodes, Internal<'nodes>> {
+        self.runtime_init.get().rev_required_list.iter()
+    }
+
+    /// Returns an [`Iterator`] over the wanted [`GraphNode`]s for this [`GraphNode`].
+    pub(in crate::graph) fn rev_wanted(&self) -> LinkValueIter<'nodes, Internal<'nodes>> {
+        self.runtime_init.get().rev_wanted_list.iter()
+    }
+
     /// Calls the startup function associated with the associated [`GraphNode`].
     pub(in crate::graph) fn startup(&self) -> Result<(), ()> {
         let internal_ptr = NonNull::from_ref(self);
@@ -427,7 +437,7 @@ pub(in crate::graph) enum State {
     Enabled,
 
     /// The [`GraphNode`] is waiting for processing during the current graph operation.
-    WaitingForProcessing,
+    WaitingForActivation,
 
     /// The [`GraphNode`] is currently active.
     Active,
@@ -442,7 +452,7 @@ impl State {
         match state {
             0 => Self::Disabled,
             1 => Self::Enabled,
-            2 => Self::WaitingForProcessing,
+            2 => Self::WaitingForActivation,
             3 => Self::Active,
             4 => Self::Failed,
             _ => unreachable!(),
@@ -454,7 +464,7 @@ impl State {
         match self {
             Self::Disabled => 0,
             Self::Enabled => 1,
-            Self::WaitingForProcessing => 2,
+            Self::WaitingForActivation => 2,
             Self::Active => 3,
             Self::Failed => 4,
         }
@@ -661,7 +671,7 @@ mod test {
         let states = [
             State::Disabled,
             State::Enabled,
-            State::WaitingForProcessing,
+            State::WaitingForActivation,
             State::Active,
             State::Failed,
         ];

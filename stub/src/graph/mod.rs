@@ -3,10 +3,7 @@
 use core::ptr;
 
 use crate::{
-    graph::{
-        linked_list::{Link, LinkedList},
-        node::{InternalRuntimeInit, State},
-    },
+    graph::{linked_list::LinkedList, node::State},
     util::SendSyncNonNull,
 };
 
@@ -14,7 +11,6 @@ mod linked_list;
 mod node;
 
 pub use node::{GraphNode, Internal, Reference};
-use sync::ControlledModificationCell;
 
 /// An [`Iterator`] over the [`GraphNode`]s.
 #[derive(Clone)]
@@ -75,7 +71,7 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
 
             runtime_info.required_list.push_back(link);
 
-            let mut rev_link_mut = unsafe { rev_link.get_mut() };
+            let rev_link_mut = unsafe { rev_link.get_mut() };
             rev_link_mut.set_value(Some(node));
 
             unsafe {
@@ -115,9 +111,19 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
                     .required_list
                     .push_back(link)
             }
+
+            let rev_link_mut = unsafe { rev_link.get_mut() };
+            rev_link_mut.set_value(Some(required_by));
+
+            runtime_info.rev_required_list.push_back(rev_link);
         }
 
-        for (&wanted, link) in node.wanted.iter().zip(runtime_info.wanted_links.iter()) {
+        for ((&wanted, link), rev_link) in node
+            .wanted
+            .iter()
+            .zip(runtime_info.wanted_links.iter())
+            .zip(runtime_info.rev_wanted_links.iter())
+        {
             assert_ne!(
                 ptr::from_ref(wanted),
                 ptr::from_ref(node),
@@ -131,12 +137,24 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
             link_mut.set_value(Some(wanted));
 
             runtime_info.wanted_list.push_back(link);
+
+            let rev_link_mut = unsafe { rev_link.get_mut() };
+            rev_link_mut.set_value(Some(node));
+
+            unsafe {
+                wanted
+                    .runtime_init
+                    .get_mut()
+                    .rev_wanted_list
+                    .push_back(rev_link)
+            }
         }
 
-        for (&wanted_by, link) in node
+        for ((&wanted_by, link), rev_link) in node
             .wanted_by
             .iter()
             .zip(runtime_info.wanted_by_links.iter())
+            .zip(runtime_info.rev_wanted_by_links.iter())
         {
             assert_ne!(
                 ptr::from_ref(wanted_by),
@@ -154,33 +172,13 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
             //
             // The invariants of this function ensure that this operation is safe.
             unsafe { wanted_by.runtime_init.get_mut().wanted_list.push_back(link) }
+
+            let rev_link_mut = unsafe { rev_link.get_mut() };
+            rev_link_mut.set_value(Some(wanted_by));
+
+            runtime_info.rev_wanted_list.push_back(rev_link);
         }
     }
-}
-
-fn initialize_link<'a, F: Fn(&'a mut InternalRuntimeInit<'a>) -> &'a mut LinkedList<'a, Internal<'a>>>(
-    node: &'a Internal<'a>,
-    dependent: &'a Internal<'a>,
-    node_runtime_init: &'a mut InternalRuntimeInit<'a>,
-    link: &'a ControlledModificationCell<Link<'a, Internal<'a>>>,
-    rev_link: &'a ControlledModificationCell<Link<'a, Internal<'a>>>,
-    func: F,
-) {
-    assert_ne!(
-        ptr::from_ref(node),
-        ptr::from_ref(dependent),
-        "a node cannot be a dependency of itself"
-    );
-
-    let link_mut = unsafe { link.get_mut() };
-    link_mut.set_value(Some(dependent));
-    let list = func(node_runtime_init);
-    list.push_back(link);
-
-    let mut rev_link_mut = unsafe { rev_link.get_mut() };
-    rev_link_mut.set_value(Some(node));
-    let rev_list = unsafe { func(dependent.runtime_init.get_mut()) };
-    rev_list.push_back(rev_link);
 }
 
 /// Runs an execution graph until the target `node` is executed.
@@ -201,7 +199,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
     for node in graph.clone() {
         assert_ne!(
             node.state(),
-            State::WaitingForProcessing,
+            State::WaitingForActivation,
             "partiallly complete runs are not supported"
         );
     }
@@ -210,7 +208,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
 
     // Mark all nodes that should be run as `State::WaitingForProcessing`.
     if !matches!(node.state(), State::Active) {
-        node.set_state(State::WaitingForProcessing);
+        node.set_state(State::WaitingForActivation);
     }
     queue.push_back(&node.link);
     while let Some(node) = queue.pop_front() {
@@ -227,7 +225,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
                 continue;
             }
 
-            requirement.set_state(State::WaitingForProcessing);
+            requirement.set_state(State::WaitingForActivation);
             queue.push_back(&requirement.link);
         }
 
@@ -245,7 +243,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
                 continue;
             }
 
-            wanted.set_state(State::WaitingForProcessing);
+            wanted.set_state(State::WaitingForActivation);
             queue.push_back(&wanted.link);
         }
     }
@@ -253,7 +251,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
     // Gather all nodes that should be run in a single list.
     let mut node_count = 0;
     for node in graph.clone() {
-        if node.state() != State::WaitingForProcessing {
+        if node.state() != State::WaitingForActivation {
             continue;
         }
 
@@ -264,14 +262,14 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
     let mut loops_since_last_execution = 0;
     'outer: while let Some(node) = queue.pop_front() {
         let node = node.get().value();
-        assert_eq!(node.state(), State::WaitingForProcessing);
+        assert_eq!(node.state(), State::WaitingForActivation);
 
         if loops_since_last_execution == node_count {
             unreachable!("cycle in execution graph");
         }
 
         for requirement in node.required() {
-            if requirement.state() == State::WaitingForProcessing {
+            if requirement.state() == State::WaitingForActivation {
                 loops_since_last_execution += 1;
                 queue.push_back(&node.link);
                 continue 'outer;
@@ -284,7 +282,7 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
         }
 
         for wanted in node.wanted() {
-            if wanted.state() == State::WaitingForProcessing {
+            if wanted.state() == State::WaitingForActivation {
                 loops_since_last_execution += 1;
                 queue.push_back(&node.link);
                 continue 'outer;
@@ -310,33 +308,40 @@ unsafe fn startup_internal<'a>(graph: GraphNodeIter<'a>, node: &'a Internal<'a>)
 /// - All [`Internal`]s must have all of their referenced [`GraphNode`]s be under the exclusive
 ///   control of this [`shutdown_internal()`] call.
 unsafe fn shutdown_internal<'a>(graph: GraphNodeIter<'a>) {
-    for node in graph.clone() {
-        assert_ne!(
-            node.state(),
-            State::WaitingForProcessing,
-            "partially complete runs are not supported"
-        );
-    }
-
     let mut queue = LinkedList::new();
 
     let mut node_count = 0;
     for node in graph.clone() {
-        if !matches!(node.state(), State::Active) {
-            continue;
+        match node.state() {
+            State::Active => {
+                queue.push_back(&node.link);
+                node_count += 1;
+            }
+            State::Disabled | State::Enabled | State::Failed => continue,
+            State::WaitingForActivation => node.set_state(State::Enabled),
         }
-
-        queue.push_back(&node.link);
-        node_count += 1;
     }
 
-    let loops_since_last_execution = 0;
-    while let Some(node) = queue.pop_front() {
+    let mut loops_since_last_execution = 0;
+    'outer: while let Some(node) = queue.pop_front() {
         let node = node.get().value();
-        assert_ne!(node.state(), State::WaitingForProcessing);
+        assert_ne!(node.state(), State::Active);
 
         if loops_since_last_execution == node_count {
             unreachable!("cycle in execution graph");
+        }
+
+        for requirement in node.rev_required() {
+            match requirement.state() {
+                State::Disabled | State::Enabled => {}
+                State::WaitingForActivation => unreachable!(),
+                State::Active => {
+                    loops_since_last_execution += 1;
+                    queue.push_back(&node.link);
+                    continue 'outer;
+                }
+                State::Failed => {}
+            }
         }
     }
 
