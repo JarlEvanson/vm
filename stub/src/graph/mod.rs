@@ -3,7 +3,10 @@
 use core::ptr;
 
 use crate::{
-    graph::{linked_list::LinkedList, node::State},
+    graph::{
+        linked_list::{Link, LinkedList},
+        node::{InternalRuntimeInit, State},
+    },
     util::SendSyncNonNull,
 };
 
@@ -11,6 +14,7 @@ mod linked_list;
 mod node;
 
 pub use node::{GraphNode, Internal, Reference};
+use sync::ControlledModificationCell;
 
 /// An [`Iterator`] over the [`GraphNode`]s.
 #[derive(Clone)]
@@ -51,7 +55,12 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
         // The invariants of this function ensure that this operation is safe.
         let runtime_info = unsafe { node.runtime_init.get_mut() };
 
-        for (&required, link) in node.required.iter().zip(runtime_info.required_links.iter()) {
+        for ((&required, link), rev_link) in node
+            .required
+            .iter()
+            .zip(runtime_info.required_links.iter())
+            .zip(runtime_info.rev_required_links.iter())
+        {
             assert_ne!(
                 ptr::from_ref(required),
                 ptr::from_ref(node),
@@ -65,12 +74,24 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
             link_mut.set_value(Some(required));
 
             runtime_info.required_list.push_back(link);
+
+            let mut rev_link_mut = unsafe { rev_link.get_mut() };
+            rev_link_mut.set_value(Some(node));
+
+            unsafe {
+                required
+                    .runtime_init
+                    .get_mut()
+                    .rev_required_list
+                    .push_back(rev_link)
+            }
         }
 
-        for (&required_by, link) in node
+        for ((&required_by, link), rev_link) in node
             .required_by
             .iter()
             .zip(runtime_info.required_by_links.iter())
+            .zip(runtime_info.rev_required_by_links.iter())
         {
             assert_ne!(
                 ptr::from_ref(required_by),
@@ -135,6 +156,31 @@ unsafe fn initialize_internal<'a>(graph: GraphNodeIter<'a>) {
             unsafe { wanted_by.runtime_init.get_mut().wanted_list.push_back(link) }
         }
     }
+}
+
+fn initialize_link<'a, F: Fn(&'a mut InternalRuntimeInit<'a>) -> &'a mut LinkedList<'a, Internal<'a>>>(
+    node: &'a Internal<'a>,
+    dependent: &'a Internal<'a>,
+    node_runtime_init: &'a mut InternalRuntimeInit<'a>,
+    link: &'a ControlledModificationCell<Link<'a, Internal<'a>>>,
+    rev_link: &'a ControlledModificationCell<Link<'a, Internal<'a>>>,
+    func: F,
+) {
+    assert_ne!(
+        ptr::from_ref(node),
+        ptr::from_ref(dependent),
+        "a node cannot be a dependency of itself"
+    );
+
+    let link_mut = unsafe { link.get_mut() };
+    link_mut.set_value(Some(dependent));
+    let list = func(node_runtime_init);
+    list.push_back(link);
+
+    let mut rev_link_mut = unsafe { rev_link.get_mut() };
+    rev_link_mut.set_value(Some(node));
+    let rev_list = unsafe { func(dependent.runtime_init.get_mut()) };
+    rev_list.push_back(rev_link);
 }
 
 /// Runs an execution graph until the target `node` is executed.
@@ -273,7 +319,7 @@ unsafe fn shutdown_internal<'a>(graph: GraphNodeIter<'a>) {
     }
 
     let mut queue = LinkedList::new();
-    
+
     let mut node_count = 0;
     for node in graph.clone() {
         if !matches!(node.state(), State::Active) {
@@ -284,6 +330,7 @@ unsafe fn shutdown_internal<'a>(graph: GraphNodeIter<'a>) {
         node_count += 1;
     }
 
+    let loops_since_last_execution = 0;
     while let Some(node) = queue.pop_front() {
         let node = node.get().value();
         assert_ne!(node.state(), State::WaitingForProcessing);

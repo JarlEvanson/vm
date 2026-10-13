@@ -37,12 +37,18 @@ impl<'nodes, T: Send + Sync> GraphNode<'nodes, T> {
         enabled: bool,
         required: &'nodes [&'nodes Internal<'nodes>; R],
         required_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; R],
+        rev_required_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; R],
         required_by: &'nodes [&'nodes Internal<'nodes>; RB],
         required_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; RB],
+        rev_required_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>;
+                    RB],
         wanted: &'nodes [&'nodes Internal<'nodes>; W],
         wanted_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; W],
+        rev_wanted_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; W],
         wanted_by: &'nodes [&'nodes Internal<'nodes>; WB],
         wanted_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; WB],
+        rev_wanted_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>;
+                    WB],
     ) -> Self {
         let (startup, shutdown) = if let Some((startup, shutdown_opt)) = life_cycle_funcs {
             (Some(startup), shutdown_opt)
@@ -65,12 +71,16 @@ impl<'nodes, T: Send + Sync> GraphNode<'nodes, T> {
                 enabled,
                 required,
                 required_links,
+                rev_required_links,
                 required_by,
                 required_by_links,
+                rev_required_by_links,
                 wanted,
                 wanted_links,
+                rev_wanted_links,
                 wanted_by,
                 wanted_by_links,
+                rev_wanted_by_links,
             ),
         }
     }
@@ -232,12 +242,18 @@ impl<'nodes> Internal<'nodes> {
         enabled: bool,
         required: &'nodes [&'nodes Internal<'nodes>; R],
         required_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; R],
+        rev_required_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; R],
         required_by: &'nodes [&'nodes Internal<'nodes>; RB],
         required_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; RB],
+        rev_required_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>;
+                    RB],
         wanted: &'nodes [&'nodes Internal<'nodes>; W],
         wanted_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; W],
+        rev_wanted_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; W],
         wanted_by: &'nodes [&'nodes Internal<'nodes>; WB],
         wanted_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>; WB],
+        rev_wanted_by_links: &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>;
+                    WB],
     ) -> Self {
         let state_value = if enabled {
             State::Enabled
@@ -269,6 +285,12 @@ impl<'nodes> Internal<'nodes> {
                 required_by_links,
                 wanted_links,
                 wanted_by_links,
+                rev_required_list: LinkedList::new(),
+                rev_wanted_list: LinkedList::new(),
+                rev_required_links,
+                rev_required_by_links,
+                rev_wanted_links,
+                rev_wanted_by_links,
             }),
         }
     }
@@ -317,8 +339,34 @@ impl<'nodes> Internal<'nodes> {
         Ok(())
     }
 
-    fn shutdown_func<T>(ptr: NonNull<()>) -> Result<(), ()> {
-        todo!()
+    fn shutdown_func<T>(node_ptr: NonNull<()>) -> Result<(), ()> {
+        let node = unsafe { node_ptr.cast::<GraphNode<T>>().as_ref() };
+        if node.startup_func.is_none() {
+            return Ok(());
+        }
+
+        let result =
+            node.data
+                .references
+                .compare_exchange(1, 0, Ordering::Acquire, Ordering::Relaxed);
+        if let Err(_) = result {
+            crate::error!("GraphNode data reference maintained during shutdown");
+            return Err(());
+        }
+
+        let data = unsafe { node.data.data.get_mut().assume_init_read() };
+        let Some(shutdown_func) = node.shutdown_func else {
+            return Ok(());
+        };
+
+        let result = shutdown_func(data);
+        if let Err(data) = result {
+            unsafe { node.data.data.get_mut().write(data) };
+            node.data.references.store(1, Ordering::Release);
+            return Err(());
+        }
+
+        Ok(())
     }
 }
 
@@ -346,6 +394,27 @@ pub(in crate::graph) struct InternalRuntimeInit<'nodes> {
         &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
     #[expect(clippy::missing_docs_in_private_items)]
     pub(in crate::graph) wanted_by_links:
+        &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
+
+    /// List of all nodes that this [`GraphNode`] is required by.
+    pub(in crate::graph) rev_required_list: LinkedList<'nodes, Internal<'nodes>>,
+    /// List of all nodes that this [`GraphNode`] is wanted by.
+    pub(in crate::graph) rev_wanted_list: LinkedList<'nodes, Internal<'nodes>>,
+
+    // Storage for [`Link`]s used to assemble the [`InternalRuntimeInit::rev_required_list`] and
+    // [`InternalRuntimeInit::rev_wanted_list`] associated with each [`GraphNode`].
+    #[expect(clippy::missing_docs_in_private_items)]
+    pub(in crate::graph) rev_required_links:
+        &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
+    #[expect(clippy::missing_docs_in_private_items)]
+    pub(in crate::graph) rev_required_by_links:
+        &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
+
+    #[expect(clippy::missing_docs_in_private_items)]
+    pub(in crate::graph) rev_wanted_links:
+        &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
+    #[expect(clippy::missing_docs_in_private_items)]
+    pub(in crate::graph) rev_wanted_by_links:
         &'nodes [ControlledModificationCell<Link<'nodes, Internal<'nodes>>>],
 }
 
@@ -437,18 +506,43 @@ macro_rules! make_node {
                 ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
             ];
 
+            static REV_REQUIRED_LINKS: [::sync::ControlledModificationCell<
+                $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
+            >; REQUIRED_COUNT] = [ $( { let _ = &$required_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
+            static REV_REQUIRED_BY_LINKS: [::sync::ControlledModificationCell<
+                $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
+            >; REQUIRED_BY_COUNT] = [ $( { let _ = &$required_by_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
+            static REV_WANTED_LINKS: [::sync::ControlledModificationCell<
+                $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
+            >; WANTED_COUNT] = [ $( { let _ = &$wanted_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
+            static REV_WANTED_BY_LINKS: [::sync::ControlledModificationCell<
+                $crate::graph::linked_list::Link<$crate::graph::node::Internal>,
+            >; WANTED_BY_COUNT] = [ $( { let _ = &$wanted_by_item;
+                ::sync::ControlledModificationCell::new($crate::graph::linked_list::Link::empty()) }),*
+            ];
+
             $crate::graph::node::GraphNode::new(
                 $name,
                 $life_cycle_funcs,
                 $active,
                 &REQUIRED,
                 &REQUIRED_LINKS,
+                &REV_REQUIRED_LINKS,
                 &REQUIRED_BY,
                 &REQUIRED_BY_LINKS,
+                &REV_REQUIRED_BY_LINKS,
                 &WANTED,
                 &WANTED_LINKS,
+                &REV_WANTED_LINKS,
                 &WANTED_BY,
                 &WANTED_BY_LINKS,
+                &REV_WANTED_BY_LINKS,
             )
         }
     }};
