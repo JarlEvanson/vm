@@ -9,10 +9,7 @@ use core::{
 
 use sync::ControlledModificationCell;
 
-use crate::graph::{
-    linked_list::{Link, LinkedList},
-    node::Internal,
-};
+use crate::graph::{linked_list::Link, node::Internal};
 
 /// A dependency relationship.
 #[derive(Debug)]

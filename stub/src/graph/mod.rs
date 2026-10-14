@@ -2,3 +2,5 @@
 
 mod linked_list;
 mod node;
+
+pub use node::{Edge, GraphNode, Internal};

@@ -4,20 +4,27 @@ use core::{mem::MaybeUninit, ptr};
 
 use sync::ControlledModificationCell;
 
-use crate::graph::{linked_list::LinkedList, node::{Internal, edge::Edge}};
+use crate::graph::{
+    linked_list::{LinkValueIter, LinkedList},
+    node::{Internal, edge::Edge},
+};
 
 /// Structure containing all of the runtime initialized portions of the [`Internal`] structure.
 #[derive(Debug)]
 pub struct InternalRuntimeInit<'nodes> {
-    /// A [`LinkedList`] of all [`Edge`]s that define the [`GraphNode`]s that the associated
-    /// [`GraphNode`] requires to be active before it is activated.
+    /// A [`LinkedList`] of all [`Edge`]s that define the [`GraphNode`][gn]s that the associated
+    /// [`GraphNode`][gn] requires to be active before it is activated.
+    ///
+    /// [gn]: super::GraphNode
     required_list: LinkedList<'nodes, Edge<'nodes>>,
     /// The [`Edge`] slots that are used to store the finalized [`Edge`]s that are added to
     /// [`InternalRuntimeInit::required_list`] during initialization.
     required_edges: &'nodes [ControlledModificationCell<MaybeUninit<Edge<'nodes>>>],
 
-    /// A [`LinkedList`] of all [`Edge`]s that define the [`GraphNode`]s for which the associated
-    /// [`GraphNode`] is a dependency.
+    /// A [`LinkedList`] of all [`Edge`]s that define the [`GraphNode`][gn]s for which the
+    /// associated [`GraphNode`][gn] is a dependency.
+    ///
+    /// [gn]: super::GraphNode
     required_by_list: LinkedList<'nodes, Edge<'nodes>>,
     /// The [`Edge`] slots that are used to store the finalized [`Edge`]s that are added to
     /// [`InternalRuntimeInit::required_by_list`] during initialization.
@@ -29,11 +36,11 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
     ///
     /// # Safety
     ///
-    /// - After this call returns, the provided [`Edge`] slices must not be accessed in any manner
+    /// - After this call returns, the provided [`Edge`] arrays must not be accessed in any manner
     ///   except through the [`InternalRuntimeInit`] instance that this call returns.
-    pub const unsafe fn new(
-        required_edges: &'nodes [ControlledModificationCell<MaybeUninit<Edge<'nodes>>>],
-        required_by_edges: &'nodes [ControlledModificationCell<MaybeUninit<Edge<'nodes>>>],
+    pub const unsafe fn new<const R: usize, const RB: usize>(
+        required_edges: &'nodes [ControlledModificationCell<MaybeUninit<Edge<'nodes>>>; R],
+        required_by_edges: &'nodes [ControlledModificationCell<MaybeUninit<Edge<'nodes>>>; RB],
     ) -> Self {
         Self {
             required_list: LinkedList::new(),
@@ -53,13 +60,13 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
     /// - Accessing the [`InternalRuntimeInit`] instances of all [`Internal`] instances that are
     ///   directly related to `this` [`Internal`] instance in a mutable manner must be valid for
     ///   the duration of this call.
-    unsafe fn initialize(this: &'nodes Internal<'nodes>) {
+    pub(super) unsafe fn initialize(this: &'nodes Internal<'nodes>) {
         // SAFETY:
         //
         // According to the invariants of this function, mutable access to `this`'s
         // [`InternalRuntimeInit`] instance is valid for the duration of this call.
         let runtime_init = unsafe { this.runtime_init.get_mut() };
-        
+
         for (&required, edge) in this
             .required_enabled
             .iter()
@@ -68,7 +75,7 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
             assert_ne!(
                 ptr::from_ref(this),
                 ptr::from_ref(required),
-                "a node must not be required by itthis"
+                "a node must not be required by itself"
             );
 
             // SAFETY:
@@ -91,7 +98,7 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
             assert_ne!(
                 ptr::from_ref(this),
                 ptr::from_ref(required),
-                "a node must not be required by itthis"
+                "a node must not be required by itself"
             );
 
             // SAFETY:
@@ -114,7 +121,7 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
             assert_ne!(
                 ptr::from_ref(this),
                 ptr::from_ref(required),
-                "a node must not be required by itthis"
+                "a node must not be required by itself"
             );
 
             // SAFETY:
@@ -137,7 +144,7 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
             assert_ne!(
                 ptr::from_ref(this),
                 ptr::from_ref(required),
-                "a node must not be required by itthis"
+                "a node must not be required by itself"
             );
 
             // SAFETY:
@@ -200,5 +207,39 @@ impl<'nodes> InternalRuntimeInit<'nodes> {
             runtime_init.required_by_list.push_back(dependency_link);
             other_runtime_init.required_list.push_back(dependent_link);
         }
+    }
+
+    /// Returns an [`Iterator`] over all [`Internal`] instances that are enabled dependents of this
+    /// [`InternalRuntimeInit`] instance.
+    pub(super) fn dependents(&self) -> DependentIter<'nodes> {
+        DependentIter(self.required_list.iter())
+    }
+
+    /// Returns an [`Iterator`] over all [`Internal`] instances that are enabled dependencies of
+    /// this [`InternalRuntimeInit`] instance.
+    pub(super) fn dependencies(&self) -> DependencyIter<'nodes> {
+        DependencyIter(self.required_list.iter())
+    }
+}
+
+/// An [`Iterator`] over all dependent relationships that are enabled.
+pub struct DependentIter<'nodes>(LinkValueIter<'nodes, Edge<'nodes>>);
+
+impl<'nodes> Iterator for DependentIter<'nodes> {
+    type Item = &'nodes Internal<'nodes>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.0.next()?.dependent())
+    }
+}
+
+/// An [`Iterator`] over all dependency relationships that are enabled.
+pub struct DependencyIter<'nodes>(LinkValueIter<'nodes, Edge<'nodes>>);
+
+impl<'nodes> Iterator for DependencyIter<'nodes> {
+    type Item = &'nodes Internal<'nodes>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.0.next()?.dependency())
     }
 }

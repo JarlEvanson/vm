@@ -22,7 +22,7 @@ pub(super) struct Data<T> {
 
 impl<T> Data<T> {
     /// Creates an unreferenced [`Data`] with its internal `data` being uninitialized.
-    pub(super) fn new() -> Self {
+    pub(super) const fn new() -> Self {
         Self {
             references: AtomicUsize::new(0),
             data: ControlledModificationCell::new(MaybeUninit::uninit()),
