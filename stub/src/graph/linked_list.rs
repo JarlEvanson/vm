@@ -3,6 +3,7 @@
 use sync::ControlledModificationCell;
 
 /// A singly linked list of values.
+#[derive(Debug)]
 pub(in crate::graph) struct LinkedList<'a, T: ?Sized> {
     /// The start of the [`LinkedList`].
     head: Option<&'a ControlledModificationCell<Link<'a, T>>>,

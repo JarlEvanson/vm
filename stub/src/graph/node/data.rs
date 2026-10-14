@@ -3,7 +3,9 @@
 //! [gn]: super::GraphNode
 
 use core::{
-    mem::MaybeUninit, ops, sync::atomic::{AtomicUsize, Ordering},
+    mem::MaybeUninit,
+    ops,
+    sync::atomic::{AtomicUsize, Ordering},
 };
 
 use sync::ControlledModificationCell;
@@ -245,7 +247,7 @@ mod test {
 
         let reference = data.ref_data();
         assert_eq!(*reference, init_val);
-        
+
         assert_eq!(data.take(), init_val);
     }
 

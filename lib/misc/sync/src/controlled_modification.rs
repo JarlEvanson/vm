@@ -20,7 +20,7 @@ impl<T> ControlledModificationCell<T> {
     }
 
     /// Returns a immutable reference to the contained value.
-    pub fn get(&self) -> &T {
+    pub const fn get(&self) -> &T {
         // SAFETY:
         // This item is only accessed by immutable reference for the entire lifetime of the
         // returned reference.
@@ -35,11 +35,16 @@ impl<T> ControlledModificationCell<T> {
     /// - All synchronization necessary to soundly mutate this value must be performed outside of
     ///   this function.
     #[allow(clippy::mut_from_ref)]
-    pub unsafe fn get_mut(&self) -> &mut T {
+    pub const unsafe fn get_mut(&self) -> &mut T {
         // SAFETY:
         // According to the invariants of [`Self::get_mut()`], creating a mutable reference is
         // safe.
         unsafe { &mut *self.value.get() }
+    }
+
+    /// Returns a mutable reference to the wrapped value.
+    pub const fn as_mut(&mut self) -> &mut T {
+        self.value.get_mut()
     }
 }
 
