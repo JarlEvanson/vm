@@ -4,11 +4,26 @@
 
 pub mod graph;
 pub mod platform;
+pub mod util;
+
+define_node!(
+    C,
+    "C",
+    type = (),
+    None,
+    active = true,
+    extended_lifetime = false,
+    required_enabled = [B],
+    required_disabled = [B],
+    required_by_enabled = [],
+    required_by_disabled = [],
+);
 
 static A: graph::GraphNode<()> = make_node!(
     "A",
     None,
     active = true,
+    extended_lifetime = false,
     required_enabled = [B],
     required_disabled = [B],
     required_by_enabled = [],
@@ -19,6 +34,7 @@ static B: graph::GraphNode<()> = make_node!(
     "B",
     None,
     active = true,
+    extended_lifetime = false,
     required_enabled = [],
     required_disabled = [],
     required_by_enabled = [],

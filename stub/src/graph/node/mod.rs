@@ -58,6 +58,7 @@ impl<'nodes, T> GraphNode<'nodes, T> {
         name: &'nodes str,
         life_cycle_funcs: Option<(ActivationFunc<T>, Option<DeactivationFunc<T>>)>,
         enabled: bool,
+        extended_lifetime: bool,
         required_enabled: &'nodes [&'nodes Internal<'nodes>; RE],
         required_disabled: &'nodes [&'nodes Internal<'nodes>; RD],
         required_by_enabled: &'nodes [&'nodes Internal<'nodes>; RBE],
@@ -85,6 +86,7 @@ impl<'nodes, T> GraphNode<'nodes, T> {
                 Internal::new::<T, _, _, _, _, _, _>(
                     name,
                     enabled,
+                    extended_lifetime,
                     required_enabled,
                     required_disabled,
                     required_by_enabled,
@@ -115,6 +117,10 @@ pub struct Internal<'nodes> {
     ///
     /// This is not unique.
     name: &'nodes str,
+
+    /// If `true`, the associated [`GraphNode`] should be activated as soon as possible and
+    /// deactivated as late as possible.
+    extended_lifetime: bool,
 
     /// The state of this [`GraphNode`].
     state: AtomicU8,
@@ -168,6 +174,7 @@ impl<'nodes> Internal<'nodes> {
     >(
         name: &'nodes str,
         enabled: bool,
+        extended_lifetime: bool,
         required_enabled: &'nodes [&'nodes Internal<'nodes>; RE],
         required_disabled: &'nodes [&'nodes Internal<'nodes>; RD],
         required_by_enabled: &'nodes [&'nodes Internal<'nodes>; RBE],
@@ -201,6 +208,7 @@ impl<'nodes> Internal<'nodes> {
 
         Self {
             name,
+            extended_lifetime,
 
             state: AtomicU8::new(state.to_u8()),
             link: ControlledModificationCell::new(Link::empty()),
@@ -238,6 +246,12 @@ impl<'nodes> Internal<'nodes> {
     /// This is not unique.
     pub(super) fn name(&self) -> &'nodes str {
         self.name
+    }
+
+    /// Returns `true` if the associated [`GraphNode`] should activated as soon as possible and
+    /// deactivated as late as possible.
+    pub(super) fn extended_lifetime(&self) -> bool {
+        self.extended_lifetime
     }
 
     /// Returns the [`State`] of this [`GraphNode`].
@@ -393,6 +407,7 @@ macro_rules! make_node {
         $name:expr,
         $life_cycle_funcs:expr,
         active = $active:expr,
+        extended_lifetime = $extended_lifetime:expr,
         required_enabled = [$($required_enabled_item:expr),* $(,)?],
         required_disabled = [$($required_disabled_item:expr),* $(,)?],
         required_by_enabled = [$($required_by_enabled_item:expr),* $(,)?],
@@ -400,13 +415,13 @@ macro_rules! make_node {
     ) => {{
         {
             const REQUIRED_ENABLED_COUNT: usize =
-                <[()]>::len(&[ $( { let _ = &$required_enabled_item; () }),*]);
+                <[()]>::len(&[ $( { let _ = &$required_enabled_item; }),*]);
             const REQUIRED_BY_ENABLED_COUNT: usize =
-                <[()]>::len(&[ $( { let _ = &$required_by_enabled_item; () }),*]);
+                <[()]>::len(&[ $( { let _ = &$required_by_enabled_item; }),*]);
             const REQUIRED_DISABLED_COUNT: usize =
-                <[()]>::len(&[ $( { let _ = &$required_disabled_item; () }),*]);
+                <[()]>::len(&[ $( { let _ = &$required_disabled_item; }),*]);
             const REQUIRED_BY_DISABLED_COUNT: usize =
-                <[()]>::len(&[ $( { let _ = &$required_by_disabled_item; () }),*]);
+                <[()]>::len(&[ $( { let _ = &$required_by_disabled_item; }),*]);
             const REQUIRED_COUNT: usize = REQUIRED_ENABLED_COUNT + REQUIRED_DISABLED_COUNT;
             const REQUIRED_BY_COUNT: usize =
                 REQUIRED_BY_ENABLED_COUNT + REQUIRED_BY_DISABLED_COUNT;
@@ -441,6 +456,7 @@ macro_rules! make_node {
                     $name,
                     $life_cycle_funcs,
                     $active,
+                    $extended_lifetime,
                     &REQUIRED_ENABLED,
                     &REQUIRED_DISABLED,
                     &REQUIRED_BY_ENABLED,
@@ -451,6 +467,116 @@ macro_rules! make_node {
             }
         }
     }};
+}
+
+/// Defines a new [`GraphNode`].
+#[macro_export]
+macro_rules! define_node  {
+    (
+        $static_name:ident,
+        $name:expr,
+        active = $active:expr,
+        extended_lifetime = $extended_lifetime:expr,
+        required_enabled = [$($required_enabled_item:expr),* $(,)?],
+        required_disabled = [$($required_disabled_item:expr),* $(,)?],
+        required_by_enabled = [$($required_by_enabled_item:expr),* $(,)?],
+        required_by_disabled = [$($required_by_disabled_item:expr),* $(,)?],
+    ) => {
+        $crate::define_node!(
+            $static_name,
+            $name,
+            type = (),
+            life_cycle_funcs = None,
+            active = $active,
+            extended_lifetime = $extended_lifetime,
+            required_enabled = [$($required_enabled_item),*],
+            required_disabled = [$($required_disabled_item),*],
+            required_by_enabled = [$($required_by_enabled_item),*],
+            required_by_disabled = [$($required_by_disabled_item),*],
+        )
+    };
+    (
+        $static_name:ident,
+        $name:expr,
+        type = $type:ty,
+        activation = $activation_func:expr,
+        active = $active:expr,
+        extended_lifetime = $extended_lifetime:expr,
+        required_enabled = [$($required_enabled_item:expr),* $(,)?],
+        required_disabled = [$($required_disabled_item:expr),* $(,)?],
+        required_by_enabled = [$($required_by_enabled_item:expr),* $(,)?],
+        required_by_disabled = [$($required_by_disabled_item:expr),* $(,)?],
+    ) => {
+        $crate::define_node!(
+            $static_name,
+            $name,
+            type = $type,
+            life_cycle_funcs = Some(($activation_func, None)),
+            active = $active,
+            extended_lifetime = $extended_lifetime,
+            required_enabled = [$($required_enabled_item),*],
+            required_disabled = [$($required_disabled_item),*],
+            required_by_enabled = [$($required_by_enabled_item),*],
+            required_by_disabled = [$($required_by_disabled_item),*],
+        )
+    };
+    (
+        $static_name:ident,
+        $name:expr,
+        type = $type:ty,
+        activation = $activation_func:expr,
+        deactivation = $deactivation_func:expr,
+        active = $active:expr,
+        extended_lifetime = $extended_lifetime:expr,
+        required_enabled = [$($required_enabled_item:expr),* $(,)?],
+        required_disabled = [$($required_disabled_item:expr),* $(,)?],
+        required_by_enabled = [$($required_by_enabled_item:expr),* $(,)?],
+        required_by_disabled = [$($required_by_disabled_item:expr),* $(,)?],
+    ) => {
+        $crate::define_node!(
+            $static_name,
+            $name,
+            type = $type,
+            life_cycle_funcs = Some(($activation_func, Some($deactivation_func))),
+            active = $active,
+            extended_lifetime = $extended_lifetime,
+            required_enabled = [$($required_enabled_item),*],
+            required_disabled = [$($required_disabled_item),*],
+            required_by_enabled = [$($required_by_enabled_item),*],
+            required_by_disabled = [$($required_by_disabled_item),*],
+        )
+    };
+    (
+        $static_name:ident,
+        $name:expr,
+        type = $type:ty,
+        $life_cycle_funcs:expr,
+        active = $active:expr,
+        extended_lifetime = $extended_lifetime:expr,
+        required_enabled = [$($required_enabled_item:expr),* $(,)?],
+        required_disabled = [$($required_disabled_item:expr),* $(,)?],
+        required_by_enabled = [$($required_by_enabled_item:expr),* $(,)?],
+        required_by_disabled = [$($required_by_disabled_item:expr),* $(,)?],
+    ) => {
+        static $static_name: $crate::graph::GraphNode<$type> = {
+            #[used]
+            #[unsafe(link_section = ".graph.internal")]
+            static INTERNAL_REFERENCE: $crate::util::SendSyncNonNull<
+                $crate::graph::Internal
+            > = $crate::util::SendSyncNonNull(::core::ptr::NonNull::from_ref(&$static_name.internal()));
+
+            $crate::make_node!(
+                $name,
+                $life_cycle_funcs,
+                active = $active,
+                extended_lifetime = $extended_lifetime,
+                required_enabled = [$($required_enabled_item),*],
+                required_disabled = [$($required_disabled_item),*],
+                required_by_enabled = [$($required_by_enabled_item),*],
+                required_by_disabled = [$($required_by_disabled_item),*],
+            )
+        };
+    };
 }
 
 #[cfg(test)]
